@@ -14,7 +14,8 @@ import {
 import { FenceLangWidget } from "./codeLang";
 import { imageSuffix, imageUrl, ImageWidget } from "./images";
 import { decorateMath } from "./math";
-import { MermaidWidget } from "./mermaidBlock";
+import { DiagramWidget } from "./diagramFence";
+import { diagramKind } from "./diagramKind";
 import { focusModeField, sourceModeField } from "./modes";
 
 /** Docs at/above this line count: decorate only after scroll settles. */
@@ -466,11 +467,12 @@ function decorateRange(
         const end = view.state.doc.lineAt(Math.max(node.from, node.to - 1));
         const info = start.text.replace(/^ {0,3}`{3,}/, "").trim().split(/\s+/)[0] ?? "";
         const cursorIn = rangeHasCursor(view, node.from, node.to);
-        if (name === "FencedCode" && info.toLowerCase() === "mermaid" && !cursorIn) {
+        const kind = diagramKind(info);
+        if (name === "FencedCode" && kind && !cursorIn) {
           const bodyFrom = start.number < end.number ? view.state.doc.line(start.number + 1).from : start.to;
           const bodyTo = end.number > start.number ? view.state.doc.line(end.number).from : end.to;
           const source = view.state.doc.sliceString(bodyFrom, Math.max(bodyFrom, bodyTo)).replace(/\n$/, "");
-          const deco = Decoration.replace({ widget: new MermaidWidget(source) }).range(start.from, start.to);
+          const deco = Decoration.replace({ widget: new DiagramWidget(kind, source) }).range(start.from, start.to);
           build.decos.push(deco);
           build.atomic.push(deco);
           for (let n = start.number + 1; n <= end.number; n += 1) {
@@ -849,27 +851,33 @@ export const livePreviewPlugin = ViewPlugin.fromClass(
 export const livePreviewTheme = EditorView.baseTheme({
   ".cm-md-heading": { fontWeight: "700", lineHeight: "1.35" },
   ".cm-md-ATXHeading1, .cm-md-SetextHeading1": {
-    fontSize: "1.7em",
+    color: "var(--h1)",
+    fontSize: "var(--h1-size)",
     paddingTop: "0.45em",
     paddingBottom: "0.1em",
   },
   ".cm-md-ATXHeading2, .cm-md-SetextHeading2": {
-    fontSize: "1.4em",
+    color: "var(--h2)",
+    fontSize: "var(--h2-size)",
     paddingTop: "0.4em",
   },
-  ".cm-md-ATXHeading3": { fontSize: "1.2em", paddingTop: "0.3em" },
-  ".cm-md-ATXHeading4, .cm-md-ATXHeading5, .cm-md-ATXHeading6": { fontSize: "1.05em" },
-  ".cm-md-strong": { fontWeight: "700" },
-  ".cm-md-em": { fontStyle: "italic" },
-  ".cm-md-strike": { textDecoration: "line-through", color: "#78716c" },
+  ".cm-md-ATXHeading3": { color: "var(--h3)", fontSize: "var(--h3-size)", paddingTop: "0.3em" },
+  ".cm-md-ATXHeading4, .cm-md-ATXHeading5, .cm-md-ATXHeading6": {
+    color: "var(--h4)",
+    fontSize: "var(--h4-size)",
+  },
+  ".cm-md-strong": { color: "var(--strong)", fontWeight: "700" },
+  ".cm-md-em": { color: "var(--em)", fontStyle: "italic" },
+  ".cm-md-strike": { textDecoration: "line-through", color: "var(--muted)" },
   ".cm-md-highlight": {
-    backgroundColor: "rgba(250, 204, 21, 0.45)",
+    backgroundColor: "var(--highlight)",
     borderRadius: "2px",
   },
   ".cm-md-code": {
     fontFamily: 'Consolas, "Courier New", monospace',
     fontSize: "0.92em",
-    backgroundColor: "rgba(159, 18, 57, 0.08)",
+    backgroundColor: "var(--code-bg)",
+    color: "var(--code-ink)",
     borderRadius: "3px",
     padding: "0 3px",
   },
@@ -879,22 +887,23 @@ export const livePreviewTheme = EditorView.baseTheme({
     fontSize: "0.72em",
     fontFamily: 'Consolas, "Courier New", monospace',
   },
-  ".cm-md-link": { color: "#1d4ed8", textDecoration: "underline" },
+  ".cm-md-link": { color: "var(--link)", textDecoration: "underline" },
   ".cm-mod-held .cm-md-link": { cursor: "pointer" },
   ".cm-md-quote": {
-    color: "#44403c",
-    borderLeft: "3px solid #d6d3d1",
+    color: "var(--quote)",
+    borderLeft: "3px solid var(--quote-border)",
     paddingLeft: "12px",
   },
   ".cm-md-codeblock": {
-    backgroundColor: "#f3f1ec",
+    backgroundColor: "var(--code-block)",
+    color: "var(--code-block-ink)",
     fontFamily: 'Consolas, "Courier New", monospace',
     fontSize: "0.92em",
   },
   ".cm-md-table-source": {
     fontFamily: 'Consolas, "Courier New", ui-monospace, monospace',
     fontSize: "0.92em",
-    backgroundColor: "rgba(28, 25, 23, 0.03)",
+    backgroundColor: "var(--table-stripe)",
   },
   ".cm-md-table-widget": {
     display: "inline-table",
@@ -905,22 +914,26 @@ export const livePreviewTheme = EditorView.baseTheme({
     verticalAlign: "top",
   },
   ".cm-md-table-widget th, .cm-md-table-widget td": {
-    border: "1px solid #e7e5e4",
+    border: "1px solid var(--table-border)",
     padding: "6px 10px",
     verticalAlign: "top",
   },
   ".cm-md-table-widget th": {
-    backgroundColor: "rgba(28, 25, 23, 0.04)",
+    backgroundColor: "var(--table-head)",
+    color: "var(--table-head-ink)",
     fontWeight: "650",
   },
+  ".cm-md-table-widget tbody tr:nth-child(even) td": {
+    backgroundColor: "var(--table-stripe)",
+  },
   ".cm-md-table-widget th:focus, .cm-md-table-widget td:focus": {
-    outline: "1px solid rgba(154, 52, 18, 0.45)",
-    backgroundColor: "rgba(154, 52, 18, 0.06)",
+    outline: "2px solid var(--accent)",
+    backgroundColor: "color-mix(in srgb, var(--accent) 10%, transparent)",
   },
   ".cm-md-hr-widget": {
     display: "block",
     border: "none",
-    borderTop: "1px solid #d6d3d1",
+    borderTop: "1px solid var(--rule)",
     margin: "0.9em 0",
   },
   ".cm-md-sink": {
@@ -946,12 +959,12 @@ export const livePreviewTheme = EditorView.baseTheme({
     overflow: "hidden",
   },
   ".cm-md-bullet, .cm-md-ol": {
-    color: "#9a3412",
+    color: "var(--marker)",
     fontWeight: "700",
   },
   ".cm-md-ol": { fontVariantNumeric: "tabular-nums" },
   ".cm-md-fence": {
-    color: "#a8a29e",
+    color: "var(--faint)",
     fontFamily: 'Consolas, "Courier New", monospace',
     fontSize: "12px",
     border: "none",
@@ -964,8 +977,8 @@ export const livePreviewTheme = EditorView.baseTheme({
     zIndex: "30",
     maxHeight: "240px",
     overflow: "auto",
-    background: "#fff",
-    border: "1px solid #e7e5e4",
+    background: "var(--menu)",
+    border: "1px solid var(--line)",
     borderRadius: "8px",
     boxShadow: "0 8px 20px rgba(28,25,23,0.12)",
     padding: "4px",
@@ -979,15 +992,19 @@ export const livePreviewTheme = EditorView.baseTheme({
     background: "transparent",
     padding: "4px 10px",
     cursor: "pointer",
-    color: "#1c1917",
+    color: "var(--ink)",
     fontSize: "13px",
   },
-  ".cm-md-lang-item:hover": { background: "#eceae6" },
-  ".cm-md-math": { cursor: "text" },
+  ".cm-md-lang-item:hover": { background: "var(--hover)" },
+  ".cm-md-math": { color: "var(--math)", cursor: "text" },
+  ".cm-md-math .katex": { color: "inherit" },
   ".cm-md-math-block": {
     display: "block",
     overflowX: "auto",
     margin: "0.35em 0",
+    padding: "0.35em 0.7em",
+    borderRadius: "8px",
+    backgroundColor: "var(--math-bg)",
   },
   ".cm-md-image": {
     display: "inline-block",
@@ -1002,7 +1019,7 @@ export const livePreviewTheme = EditorView.baseTheme({
     height: "auto",
   },
   ".cm-md-image-missing": {
-    color: "#a8a29e",
+    color: "var(--faint)",
     fontSize: "13px",
   },
   ".cm-md-image-handle": {
@@ -1023,7 +1040,8 @@ export const livePreviewTheme = EditorView.baseTheme({
     background: "var(--paper, #f7f5f0)",
     cursor: "pointer",
   },
-  ".cm-md-mermaid svg": { maxWidth: "100%", height: "auto" },
+  ".cm-md-mermaid svg, .cm-md-mermaid img": { maxWidth: "100%", height: "auto" },
+  ".cm-md-mermaid .vega-embed": { width: "100%" },
   ".cm-md-table-wrap": {
     display: "inline-block",
     width: "100%",
@@ -1040,10 +1058,10 @@ export const livePreviewTheme = EditorView.baseTheme({
   ".cm-md-table-op": {
     height: "26px",
     padding: "0 8px",
-    border: "1px solid #e7e5e4",
+    border: "1px solid var(--line)",
     borderRadius: "6px",
-    background: "#fff",
-    color: "#1c1917",
+    background: "var(--menu)",
+    color: "var(--ink)",
     cursor: "pointer",
     fontSize: "12px",
   },

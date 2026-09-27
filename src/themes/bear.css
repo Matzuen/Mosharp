@@ -1,0 +1,53 @@
+/* 熊红 (Bear)
+   scheme: light
+   set: colamd
+   变量说明见同目录 README.md。 */
+html[data-theme="bear"] {
+  color-scheme: light;
+  --paper: #ffffff;
+  --ink: #262626;
+  --muted: #767676;
+  --faint: #8a8a8a;
+  --line: #eeecea;
+  --bar: #f7f5f3;
+  --chrome: #f7f5f3;
+  --accent: #d43d2a;
+  --link: #d43d2a;
+  --menu: #ffffff;
+  --hover: #f3eeeb;
+  --side: #f7f5f3;
+  --code-bg: rgba(212, 61, 42, 0.08);
+  --code-block: #2e2a28;
+  --code-ink: #d43d2a;
+  --code-block-ink: #efe9e4;
+  --quote: #262626;
+  --quote-border: #d43d2a;
+  --highlight: #ffe9a8;
+  --selection: rgba(212, 61, 42, 0.14);
+  --danger: #c42b1c;
+  --on-danger: #ffffff;
+  --h1: #d43d2a;
+  --h2: #262626;
+  --h3: #d43d2a;
+  --h4: #767676;
+  --h1-size: 1.75em;
+  --h2-size: 1.42em;
+  --h3-size: 1.22em;
+  --h4-size: 1.05em;
+  --table-border: #eeecea;
+  --table-head: #f7f5f3;
+  --table-head-ink: #d43d2a;
+  --table-stripe: rgba(212, 61, 42, 0.04);
+  --math: #d43d2a;
+  --math-bg: #f7f5f3;
+  --rule: #d43d2a;
+  --marker: #d43d2a;
+  --strong: #262626;
+  --em: #262626;
+  --syn-keyword: #d43d2a;
+  --syn-string: #8a4b2f;
+  --syn-number: #b45309;
+  --syn-comment: #8a8a8a;
+  --editor-font: "Segoe UI", "Microsoft YaHei UI", "Microsoft YaHei", sans-serif;
+  --editor-size: 17px;
+}

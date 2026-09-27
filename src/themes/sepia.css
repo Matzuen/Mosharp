@@ -1,0 +1,53 @@
+/* 羊皮纸 (Sepia)
+   scheme: light
+   set: colamd
+   变量说明见同目录 README.md。 */
+html[data-theme="sepia"] {
+  color-scheme: light;
+  --paper: #f6efe0;
+  --ink: #4f4032;
+  --muted: #7b6b54;
+  --faint: #9a8a72;
+  --line: #e7ddc7;
+  --bar: #efe6d0;
+  --chrome: #efe6d0;
+  --accent: #9c5e29;
+  --link: #9c5e29;
+  --menu: #fbf6ea;
+  --hover: #eadfc8;
+  --side: #efe6d0;
+  --code-bg: rgba(122, 90, 51, 0.1);
+  --code-block: #ece2cb;
+  --code-ink: #7a5a33;
+  --code-block-ink: #4f4032;
+  --quote: #7b6b54;
+  --quote-border: #c9a86a;
+  --highlight: #f2dfa8;
+  --selection: rgba(160, 98, 45, 0.18);
+  --danger: #c42b1c;
+  --on-danger: #ffffff;
+  --h1: #9c5e29;
+  --h2: #4f4032;
+  --h3: #7a5a33;
+  --h4: #7b6b54;
+  --h1-size: 1.85em;
+  --h2-size: 1.48em;
+  --h3-size: 1.25em;
+  --h4-size: 1.08em;
+  --table-border: #e7ddc7;
+  --table-head: #efe6d0;
+  --table-head-ink: #4f4032;
+  --table-stripe: rgba(156, 94, 41, 0.06);
+  --math: #9c5e29;
+  --math-bg: #ece2cb;
+  --rule: #c9a86a;
+  --marker: #9c5e29;
+  --strong: #4f4032;
+  --em: #7b6b54;
+  --syn-keyword: #9c5e29;
+  --syn-string: #7a5a33;
+  --syn-number: #b45309;
+  --syn-comment: #9a8a72;
+  --editor-font: Georgia, "Source Han Serif SC", "Noto Serif SC", "Songti SC", serif;
+  --editor-size: 17px;
+}

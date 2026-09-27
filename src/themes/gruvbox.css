@@ -1,0 +1,53 @@
+/* 暖木 (Gruvbox)
+   scheme: dark
+   set: colamd
+   变量说明见同目录 README.md。 */
+html[data-theme="gruvbox"] {
+  color-scheme: dark;
+  --paper: #282828;
+  --ink: #ebdbb2;
+  --muted: #c5b5a5;
+  --faint: #928374;
+  --line: #373432;
+  --bar: #3c3836;
+  --chrome: #3c3836;
+  --accent: #fe8019;
+  --link: #83a598;
+  --menu: #3c3836;
+  --hover: rgba(255, 255, 255, 0.08);
+  --side: #1d2021;
+  --code-bg: rgba(235, 219, 178, 0.1);
+  --code-block: #1d2021;
+  --code-ink: #b8bb26;
+  --code-block-ink: #ebdbb2;
+  --quote: #bdae93;
+  --quote-border: #fe8019;
+  --highlight: rgba(250, 189, 47, 0.28);
+  --selection: rgba(254, 128, 25, 0.28);
+  --danger: #fb4934;
+  --on-danger: #ffffff;
+  --h1: #fe8019;
+  --h2: #ebdbb2;
+  --h3: #fabd2f;
+  --h4: #bdae93;
+  --h1-size: 1.7em;
+  --h2-size: 1.4em;
+  --h3-size: 1.2em;
+  --h4-size: 1.05em;
+  --table-border: #504945;
+  --table-head: #3c3836;
+  --table-head-ink: #fe8019;
+  --table-stripe: rgba(254, 128, 25, 0.08);
+  --math: #fabd2f;
+  --math-bg: #1d2021;
+  --rule: #fe8019;
+  --marker: #fe8019;
+  --strong: #ebdbb2;
+  --em: #d5c4a1;
+  --syn-keyword: #fb4934;
+  --syn-string: #b8bb26;
+  --syn-number: #d3869b;
+  --syn-comment: #928374;
+  --editor-font: "Segoe UI", "Microsoft YaHei UI", "Microsoft YaHei", sans-serif;
+  --editor-size: 17px;
+}

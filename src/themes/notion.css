@@ -1,0 +1,53 @@
+/* 简白 (Notion)
+   scheme: light
+   set: colamd
+   变量说明见同目录 README.md。 */
+html[data-theme="notion"] {
+  color-scheme: light;
+  --paper: #ffffff;
+  --ink: #37352f;
+  --muted: #777674;
+  --faint: #9b9a97;
+  --line: #eeeeed;
+  --bar: #f7f6f3;
+  --chrome: #f7f6f3;
+  --accent: #2383e2;
+  --link: #37352f;
+  --menu: #ffffff;
+  --hover: #f1f1ef;
+  --side: #f7f6f3;
+  --code-bg: #f7f6f3;
+  --code-block: #f7f6f3;
+  --code-ink: #eb5757;
+  --code-block-ink: #37352f;
+  --quote: #37352f;
+  --quote-border: #37352f;
+  --highlight: #fdecc8;
+  --selection: rgba(35, 131, 226, 0.16);
+  --danger: #c42b1c;
+  --on-danger: #ffffff;
+  --h1: #37352f;
+  --h2: #37352f;
+  --h3: #37352f;
+  --h4: #787774;
+  --h1-size: 1.6em;
+  --h2-size: 1.35em;
+  --h3-size: 1.15em;
+  --h4-size: 1.02em;
+  --table-border: #e9e9e8;
+  --table-head: #f7f6f3;
+  --table-head-ink: #37352f;
+  --table-stripe: #fbfbfa;
+  --math: #2383e2;
+  --math-bg: #f7f6f3;
+  --rule: #e9e9e8;
+  --marker: #37352f;
+  --strong: #37352f;
+  --em: #37352f;
+  --syn-keyword: #eb5757;
+  --syn-string: #0b6e99;
+  --syn-number: #d9730d;
+  --syn-comment: #9b9a97;
+  --editor-font: "Segoe UI", "Microsoft YaHei UI", "Microsoft YaHei", sans-serif;
+  --editor-size: 17px;
+}

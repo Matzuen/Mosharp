@@ -1,7 +1,9 @@
 import { syntaxTree } from "@codemirror/language";
 import { EditorView, ViewPlugin } from "@codemirror/view";
+import { referenceAt } from "../writing";
 import { findHeadingLine } from "./anchors";
 import { flashEffect } from "./flash";
+import { writingIndexField } from "./writingPreview";
 
 function modHeld(event: MouseEvent | KeyboardEvent) {
   return event.ctrlKey || event.metaKey;
@@ -48,11 +50,20 @@ export const linkClickHandler = EditorView.domEventHandlers({
         }
       },
     });
-    if (linkFrom < 0) return false;
-    const raw = view.state.doc.sliceString(linkFrom, linkTo);
-    const match = /\[[^\]]*\]\(([^)]+)\)/.exec(raw);
-    if (!match) return false;
-    const href = match[1].trim();
+    const line = view.state.doc.lineAt(pos);
+    let href = "";
+    if (linkFrom >= 0) {
+      const raw = view.state.doc.sliceString(linkFrom, linkTo);
+      href = /\[[^\]]*\]\(([^)]+)\)/.exec(raw)?.[1]?.trim() ?? "";
+    }
+    if (!href) {
+      const ref = referenceAt(line.text, pos - line.from);
+      const def = ref
+        ? view.state.field(writingIndexField).links.get(ref.id.toLowerCase())
+        : undefined;
+      href = def?.url ?? "";
+    }
+    if (!href) return false;
     if (href.startsWith("#")) {
       const line = findHeadingLine(view.state.doc, href.slice(1));
       if (line != null) {

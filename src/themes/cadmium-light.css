@@ -1,0 +1,53 @@
+/* Cadmium Light (Cadmium Light)
+   scheme: light
+   set: marktext
+   变量说明见同目录 README.md。 */
+html[data-theme="cadmium-light"] {
+  color-scheme: light;
+  --paper: #ffffff;
+  --ink: #333333;
+  --muted: #666666;
+  --faint: #999999;
+  --line: #e6e6e6;
+  --bar: #f2f2f2;
+  --chrome: #f2f2f2;
+  --accent: #21b56f;
+  --link: #21b56f;
+  --menu: #ffffff;
+  --hover: #f0f0f0;
+  --side: #f2f2f2;
+  --code-bg: rgba(0, 0, 0, 0.04);
+  --code-block: #f7f7f7;
+  --code-ink: #4d4d4d;
+  --code-block-ink: #4d4d4d;
+  --quote: #808080;
+  --quote-border: #21b56f;
+  --highlight: rgba(33, 181, 111, 0.35);
+  --selection: rgba(33, 181, 111, 0.18);
+  --danger: #ff6969;
+  --on-danger: #ffffff;
+  --h1: #21b56f;
+  --h2: #333333;
+  --h3: #178a54;
+  --h4: #666666;
+  --h1-size: 1.7em;
+  --h2-size: 1.4em;
+  --h3-size: 1.2em;
+  --h4-size: 1.05em;
+  --table-border: #e6e6e6;
+  --table-head: #f3faf6;
+  --table-head-ink: #178a54;
+  --table-stripe: rgba(33, 181, 111, 0.06);
+  --math: #178a54;
+  --math-bg: #f3faf6;
+  --rule: #21b56f;
+  --marker: #21b56f;
+  --strong: #333333;
+  --em: #4d4d4d;
+  --syn-keyword: #21b56f;
+  --syn-string: #0b6e4f;
+  --syn-number: #b45309;
+  --syn-comment: #999999;
+  --editor-font: "Segoe UI", "Microsoft YaHei UI", "Microsoft YaHei", sans-serif;
+  --editor-size: 17px;
+}

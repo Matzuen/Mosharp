@@ -3,6 +3,7 @@ import { openSearchPanel } from "@codemirror/search";
 import type { EditorState } from "@codemirror/state";
 import { isTauri } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { ask } from "@tauri-apps/plugin-dialog";
 import {
@@ -18,6 +19,7 @@ import { ackClosePrompt, resolveClose, setUnsaved } from "./api/close";
 import { placeImage } from "./api/images";
 import {
   listDirectory,
+  normalizeEncoding,
   openFolderPath,
   openMarkdownPath,
   readDocument,
@@ -28,12 +30,23 @@ import {
   syncFileWatches,
   touchFileWatchBaseline,
   writeDocument,
+  type FileEncoding,
   type DirEntryInfo,
 } from "./api/files";
 import logoUrl from "./assets/logo-mark.png";
 import { generateBenchmark } from "./editor/benchmark";
 import { createEditor, INITIAL_DOCUMENT, type EditorController } from "./editor/createEditor";
+import {
+  detectLineEnding,
+  prepareForSave,
+  sameText,
+  savedBuffer,
+  type LineEnding,
+} from "./editor/fidelity";
+import { readingColumnCss } from "./export/readingColumn";
+import { runExport, type ExportKind } from "./export/runExport";
 import { pendingImagesIn } from "./editor/preview/docPath";
+import { setPasteImages } from "./editor/preview/images";
 import {
   insertBullet,
   insertFence,
@@ -42,27 +55,39 @@ import {
   insertLink,
   insertMathBlock,
   insertMermaid,
+  insertPlantuml,
+  insertVega,
   insertQuote,
   insertTable,
+  insertFootnote,
   toggleBold,
   toggleCode,
   toggleHighlight,
   toggleItalic,
   toggleStrike,
+  toggleSub,
+  toggleSup,
   toggleTask,
 } from "./editor/preview/formatCommands";
 import { activeOutlineIndex, parseOutlineDoc, type OutlineItem } from "./editor/outline";
-import { t, tLines } from "./shell/i18n";
-import { MenuBar, type MenuDef } from "./shell/MenuBar";
+import { LOCALE_LABELS, t, tLines } from "./shell/i18n";
+import { CommandPalette, type PaletteAction } from "./shell/CommandPalette";
+import { MenuBar, type MenuDef, type MenuEntry } from "./shell/MenuBar";
+import { SettingsDialog } from "./shell/SettingsDialog";
+import { chordFromEvent } from "./shell/shortcuts";
 import {
   clampPanelWidth,
   CONTENT_WIDTHS,
+  LOCALES,
   loadPreferences,
   MAX_PANEL,
   MIN_PANEL,
   savePreferences,
   type Preferences,
+  type ShortcutId,
 } from "./shell/preferences";
+import { applyAppearance } from "./themes/apply";
+import { THEMES, themeLabel } from "./themes/catalog";
 import {
   loadRecent,
   loadSession,
@@ -82,6 +107,8 @@ interface TabRecord {
   dirty: boolean;
   state: EditorState | null;
   scrollTop: number;
+  lineEnding: LineEnding;
+  encoding: FileEncoding;
 }
 
 interface MenuState {
@@ -155,6 +182,10 @@ export default function App() {
   const [activeHeading, setActiveHeading] = createSignal(-1);
   const [tree, setTree] = createSignal<TreeNode[]>([]);
   const [menu, setMenu] = createSignal<MenuState | null>(null);
+  const [paletteOpen, setPaletteOpen] = createSignal(false);
+  const [settingsOpen, setSettingsOpen] = createSignal(false);
+  const [dropHover, setDropHover] = createSignal(false);
+  const [fileQuery, setFileQuery] = createSignal("");
   const [recent, setRecent] = createSignal<RecentEntry[]>(loadRecent());
 
   const locale = createMemo(() => prefs().locale);
@@ -166,15 +197,66 @@ export default function App() {
   });
 
   function persistPrefs(next: Preferences) {
+    const previous = prefs();
     setPrefs(next);
     savePreferences(next);
     document.documentElement.style.setProperty("--content-width", `${next.contentWidth}px`);
+    let columnStyle = document.getElementById("mosharp-reading-column");
+    if (!columnStyle) {
+      columnStyle = document.createElement("style");
+      columnStyle.id = "mosharp-reading-column";
+      document.head.appendChild(columnStyle);
+    }
+    columnStyle.textContent = readingColumnCss(next.contentWidth);
     document.documentElement.style.setProperty("--panel-width", `${next.panelWidth}px`);
-    document.documentElement.lang = next.locale === "en" ? "en" : "zh-CN";
+    applyAppearance(next);
+    if (!editor) return;
+    if (next.theme !== previous.theme) editor.refreshDecorations();
+    if (
+      next.theme !== previous.theme ||
+      next.editorFont !== previous.editorFont ||
+      next.editorSize !== previous.editorSize
+    ) {
+      editor.remeasure();
+    }
   }
 
   function patchPrefs(partial: Partial<Preferences>) {
     persistPrefs({ ...prefs(), ...partial });
+  }
+
+  function shortcut(id: ShortcutId): string {
+    return prefs().shortcuts[id] || "";
+  }
+
+  function applyEditorPrefs() {
+    if (!editor) return;
+    const current = prefs();
+    const modes = editor.getModes();
+    if (
+      modes.sourceMode !== current.sourceMode ||
+      modes.typewriter !== current.typewriter ||
+      modes.focus !== current.focusMode
+    ) {
+      editor.setModes({
+        sourceMode: current.sourceMode,
+        typewriter: current.typewriter,
+        focus: current.focusMode,
+      });
+    }
+    editor.setSpellcheck(current.spellcheck, current.spellLang);
+    editor.setWriting(
+      {
+        footnotes: current.footnotes,
+        emoji: current.emoji,
+        superSub: current.superSub,
+        customWords: current.customWords,
+      },
+      current.pandocMath,
+    );
+    editor.setFormatKeys(current.shortcuts);
+    editor.setPhrases(current.locale);
+    setPasteImages(current.pasteImages);
   }
 
   function rememberRecent(path: string) {
@@ -228,6 +310,8 @@ export default function App() {
         dirty: tooLarge ? false : tab.dirty,
         scrollTop: isActive ? editor!.getScrollTop() : tab.scrollTop,
         selection,
+        lineEnding: tab.lineEnding,
+        encoding: tab.encoding,
       };
     });
     saveSession({
@@ -245,11 +329,12 @@ export default function App() {
         ? editor.text()
         : (tab.state?.doc.toString() ?? "");
     if (!content.trim()) return;
+    const disk = prepareForSave(content, tab.lineEnding);
     if (content.length > MAX_SESSION_CHARS) return;
     try {
       const savedPath = await saveRecoveryCopy(
         documentName(tab.path, t(locale(), "untitled")),
-        content,
+        disk,
       );
       setNotice(`${t(locale(), "recovered")}：${savedPath}`);
     } catch (error) {
@@ -331,12 +416,26 @@ export default function App() {
     editor.focus();
   }
 
-  function createTab(path: string | null, text: string, dirtyValue = false): string {
+  function createTab(
+    path: string | null,
+    text: string,
+    dirtyValue = false,
+    lineEnding: LineEnding = detectLineEnding(text),
+    encoding: FileEncoding = "utf-8",
+  ): string {
     if (!editor) return "";
     captureActive();
     const id = newTabId();
     const state = editor.createState(text);
-    const tab: TabRecord = { id, path, dirty: dirtyValue, state, scrollTop: 0 };
+    const tab: TabRecord = {
+      id,
+      path,
+      dirty: dirtyValue,
+      state,
+      scrollTop: 0,
+      lineEnding,
+      encoding,
+    };
     setTabs((current) => [...current, tab]);
     activeId = id;
     setActiveTabId(id);
@@ -381,6 +480,8 @@ export default function App() {
         dirty: false,
         state: editor.createState(INITIAL_DOCUMENT),
         scrollTop: 0,
+        lineEnding: "\n",
+        encoding: "utf-8",
       };
       setTabs([fresh]);
       activeId = fresh.id;
@@ -431,7 +532,15 @@ export default function App() {
         const state = editor.createState(opened.content);
         setTabs((current) => [
           ...current,
-          { id, path, dirty: false, state, scrollTop: 0 },
+          {
+            id,
+            path,
+            dirty: false,
+            state,
+            scrollTop: 0,
+            lineEnding: detectLineEnding(opened.content),
+            encoding: normalizeEncoding(opened.encoding),
+          },
         ]);
         activeId = id;
         setActiveTabId(id);
@@ -451,7 +560,10 @@ export default function App() {
       scheduleSessionSave();
       refreshWatches();
       const total = performance.now() - started;
-      setNotice(`打开 ${formatMs(total)} ms（编辑器 ${formatMs(loaded)} ms）`);
+      const openedEncoding = tabs().find((tab) => tab.id === activeId)?.encoding;
+      const encodingNote =
+        openedEncoding && openedEncoding !== "utf-8" ? `，${openedEncoding}` : "";
+      setNotice(`打开 ${formatMs(total)} ms（编辑器 ${formatMs(loaded)} ms）${encodingNote}`);
     } catch (error) {
       setNotice(`${t(locale(), "openFailed")}：${errorText(error)}`);
     }
@@ -468,6 +580,55 @@ export default function App() {
       await openPathInTab(selected);
     } catch (error) {
       setNotice(`${t(locale(), "openFailed")}：${errorText(error)}`);
+    }
+  }
+
+  let droppedStamp = "";
+  let droppedAt = 0;
+  function claimDropped(paths: string[]): string[] | null {
+    const unique = [...new Set(paths.map((path) => path.trim()).filter(Boolean))];
+    if (!unique.length) return null;
+    const stamp = unique.join("\0");
+    const now = performance.now();
+    if (stamp === droppedStamp && now - droppedAt < 500) return null;
+    droppedStamp = stamp;
+    droppedAt = now;
+    return unique;
+  }
+
+  async function openDroppedPaths(paths: string[]) {
+    const unique = claimDropped(paths);
+    if (!unique) return;
+    for (const path of unique) {
+      let isDir = false;
+      try {
+        await listDirectory(path);
+        isDir = true;
+      } catch {
+        isDir = false;
+      }
+      if (isDir) {
+        patchPrefs({ workspaceRoot: path, panelOpen: true, panelMode: "files" });
+        await reloadTree(path);
+        continue;
+      }
+      await openPathInTab(path);
+    }
+  }
+
+  async function openDroppedFiles(files: File[]) {
+    for (const file of files) {
+      if (file.size > 64 * 1024 * 1024) {
+        setNotice(`${t(locale(), "openFailed")}：${file.name}`);
+        continue;
+      }
+      const text = await file.text();
+      if (text.includes("\u0000")) {
+        setNotice(`${t(locale(), "openFailed")}：${file.name}`);
+        continue;
+      }
+      createTab(null, text, false);
+      setNotice(file.name);
     }
   }
 
@@ -607,7 +768,13 @@ export default function App() {
           await placeImage(target, image.relative, image.absolute);
         }
       }
-      await writeDocument(target, editor.text());
+      const active = tabs().find((tab) => tab.id === activeId);
+      const ending = active?.lineEnding ?? "\n";
+      const encoding = active?.encoding ?? "utf-8";
+      const disk = prepareForSave(editor.text(), ending);
+      const buffer = savedBuffer(editor.text());
+      if (buffer !== editor.text()) editor.rewrite(buffer);
+      await writeDocument(target, disk, encoding);
       if (isTauri()) await touchFileWatchBaseline(target);
       setTabs((current) =>
         current.map((tab) => (tab.id === activeId ? { ...tab, path: target, dirty: false } : tab)),
@@ -623,6 +790,38 @@ export default function App() {
       if (prefs().workspaceRoot) void reloadTree();
     } catch (error) {
       setNotice(`${t(locale(), "saveFailed")}：${errorText(error)}`);
+    }
+  }
+
+  async function exportDoc(kind: ExportKind) {
+    if (!editor) return;
+    const sourceMode = editor.getModes().sourceMode;
+    const tab = activeTab();
+    try {
+      await runExport(kind, {
+        markdown: editor.text(),
+        cursorOffset: editor.getSelection().head,
+        contentWidth: prefs().contentWidth,
+        docPath: tab?.path ?? null,
+        title: documentName(tab?.path ?? null, t(locale(), "untitled")),
+        desktop: isTauri(),
+        notice: setNotice,
+        saved: t(locale(), "exportedOk"),
+        failed: t(locale(), "exportFailed"),
+        needDesktop: t(locale(), "needDesktop"),
+        labels: {
+          pdf: t(locale(), "exportPdf"),
+          html: t(locale(), "exportHtml"),
+          word: t(locale(), "exportWord"),
+          png: t(locale(), "exportPng"),
+          slidesPdf: t(locale(), "exportSlides"),
+          prev: t(locale(), "slidePrev"),
+          next: t(locale(), "slideNext"),
+          exit: t(locale(), "slideExit"),
+        },
+      });
+    } finally {
+      if (editor.getModes().sourceMode !== sourceMode) editor.setModes({ sourceMode });
     }
   }
 
@@ -738,12 +937,12 @@ export default function App() {
         label: label("menuFile"),
         access: "F",
         items: [
-          { id: "new", label: label("new"), shortcut: "Ctrl+T", run: () => newDoc() },
-          { id: "open", label: label("open"), shortcut: "Ctrl+O", run: () => void openDoc() },
+          { id: "new", label: label("new"), shortcut: shortcut("newFile"), run: () => newDoc() },
+          { id: "open", label: label("open"), shortcut: shortcut("open"), run: () => void openDoc() },
           {
             id: "open-folder",
             label: label("openFolder"),
-            shortcut: "Ctrl+Shift+O",
+            shortcut: shortcut("openFolder"),
             run: () => void openFolder(),
           },
           {
@@ -759,8 +958,20 @@ export default function App() {
                 : [{ id: "no-recent", label: label("noRecent"), disabled: true }],
           },
           { id: "sep-file-1", sep: true },
-          { id: "save", label: label("save"), shortcut: "Ctrl+S", run: () => void save() },
-          { id: "save-as", label: label("saveAs"), shortcut: "Ctrl+Shift+S", run: () => void saveAs() },
+          { id: "save", label: label("save"), shortcut: shortcut("save"), run: () => void save() },
+          { id: "save-as", label: label("saveAs"), shortcut: shortcut("saveAs"), run: () => void saveAs() },
+          {
+            id: "export",
+            label: label("exportMenu"),
+            children: [
+              { id: "export-pdf", label: label("exportPdf"), run: () => void exportDoc("pdf") },
+              { id: "export-html", label: label("exportHtml"), run: () => void exportDoc("html") },
+              { id: "export-word", label: label("exportWord"), run: () => void exportDoc("word") },
+              { id: "export-png", label: label("exportPng"), run: () => void exportDoc("png") },
+              { id: "slideshow", label: label("slideshow"), run: () => void exportDoc("slides") },
+              { id: "export-slides", label: label("exportSlides"), run: () => void exportDoc("slidesPdf") },
+            ],
+          },
           { id: "sep-file-2", sep: true },
           {
             id: "close-tab",
@@ -811,7 +1022,7 @@ export default function App() {
           {
             id: "task",
             label: label("task"),
-            shortcut: "Ctrl+Enter",
+            shortcut: shortcut("task"),
             run: () => edit((view) => toggleTask(view)),
           },
           { id: "quote", label: label("quote"), run: () => edit((view) => insertQuote(view)) },
@@ -821,6 +1032,8 @@ export default function App() {
           { id: "table", label: label("table"), run: () => edit((view) => insertTable(view)) },
           { id: "hr", label: label("hr"), run: () => edit((view) => insertHr(view)) },
           { id: "mermaid", label: "Mermaid", run: () => edit((view) => insertMermaid(view)) },
+          { id: "vega", label: "Vega-Lite", run: () => edit((view) => insertVega(view)) },
+          { id: "plantuml", label: "PlantUML", run: () => edit((view) => insertPlantuml(view)) },
         ],
       },
       {
@@ -828,27 +1041,36 @@ export default function App() {
         label: label("menuFormat"),
         access: "O",
         items: [
-          { id: "bold", label: label("bold"), shortcut: "Ctrl+B", run: () => edit((view) => toggleBold(view)) },
-          { id: "italic", label: label("italic"), shortcut: "Ctrl+I", run: () => edit((view) => toggleItalic(view)) },
+          { id: "bold", label: label("bold"), shortcut: shortcut("bold"), run: () => edit((view) => toggleBold(view)) },
+          { id: "italic", label: label("italic"), shortcut: shortcut("italic"), run: () => edit((view) => toggleItalic(view)) },
           {
             id: "code",
             label: label("inlineCode"),
-            shortcut: "Ctrl+E",
+            shortcut: shortcut("code"),
             run: () => edit((view) => toggleCode(view)),
           },
           {
             id: "highlight",
             label: label("highlight"),
-            shortcut: "Ctrl+Shift+H",
+            shortcut: shortcut("highlight"),
             run: () => edit((view) => toggleHighlight(view)),
           },
           {
             id: "strike",
             label: label("strike"),
-            shortcut: "Ctrl+Shift+U",
+            shortcut: shortcut("strike"),
             run: () => edit((view) => toggleStrike(view)),
           },
-          { id: "link", label: label("link"), shortcut: "Ctrl+K", run: () => edit((view) => insertLink(view)) },
+          { id: "link", label: label("link"), shortcut: shortcut("link"), run: () => edit((view) => insertLink(view)) },
+          {
+            id: "format-more",
+            label: label("formatMore"),
+            children: [
+              { id: "sup", label: label("sup"), run: () => edit((view) => toggleSup(view)) },
+              { id: "sub", label: label("sub"), run: () => edit((view) => toggleSub(view)) },
+              { id: "footnote", label: label("footnote"), run: () => edit((view) => insertFootnote(view)) },
+            ],
+          },
         ],
       },
       {
@@ -859,7 +1081,7 @@ export default function App() {
           {
             id: "panel",
             label: label("panel"),
-            shortcut: "Ctrl+\\",
+            shortcut: shortcut("toggleSidebar"),
             checked: prefs().panelOpen,
             run: () => patchPrefs({ panelOpen: !prefs().panelOpen }),
           },
@@ -879,7 +1101,7 @@ export default function App() {
           {
             id: "source",
             label: label("sourceMode"),
-            shortcut: "Ctrl+/",
+            shortcut: shortcut("sourceMode"),
             checked: prefs().sourceMode,
             run: () => toggleMode("sourceMode"),
           },
@@ -903,41 +1125,55 @@ export default function App() {
             run: () => patchPrefs({ contentWidth: width }),
           })),
           { id: "sep-view-3", sep: true },
-          {
-            id: "lang-zh",
-            label: "中文",
-            checked: lang === "zh-CN",
+          ...LOCALES.map((id) => ({
+            id: `lang-${id}`,
+            label: LOCALE_LABELS[id],
+            checked: lang === id,
             run: () => {
-              patchPrefs({ locale: "zh-CN" });
-              editor?.setPhrases("zh-CN");
-              setNotice(t("zh-CN", "ready"));
+              patchPrefs({ locale: id });
+              setNotice(t(id, "ready"));
               void syncTitle();
             },
-          },
-          {
-            id: "lang-en",
-            label: "English",
-            checked: lang === "en",
-            run: () => {
-              patchPrefs({ locale: "en" });
-              editor?.setPhrases("en");
-              setNotice(t("en", "ready"));
-              void syncTitle();
-            },
-          },
+          })),
         ],
       },
       {
         id: "theme",
         label: label("menuTheme"),
         access: "T",
-        items: [{ id: "paper", label: label("paperTheme"), checked: true }],
+        items: [
+          ...THEMES.filter((item) => item.scheme === "light").map((item) => ({
+            id: `theme-${item.id}`,
+            label: themeLabel(item.id, lang),
+            checked: prefs().theme === item.id,
+            run: () => patchPrefs({ theme: item.id }),
+          })),
+          { id: "sep-theme", sep: true },
+          ...THEMES.filter((item) => item.scheme === "dark").map((item) => ({
+            id: `theme-${item.id}`,
+            label: themeLabel(item.id, lang),
+            checked: prefs().theme === item.id,
+            run: () => patchPrefs({ theme: item.id }),
+          })),
+        ],
       },
       {
         id: "help",
         label: label("menuHelp"),
         access: "H",
         items: [
+          {
+            id: "settings",
+            label: label("settings"),
+            shortcut: shortcut("settings"),
+            run: () => setSettingsOpen(true),
+          },
+          {
+            id: "palette",
+            label: label("commandPalette"),
+            shortcut: shortcut("commandPalette"),
+            run: () => setPaletteOpen(true),
+          },
           { id: "benchmark", label: label("benchmark"), run: () => void loadBenchmark() },
         ],
       },
@@ -956,11 +1192,15 @@ export default function App() {
         let content = snap.content;
         let dirtyValue = snap.dirty;
         let path = snap.path;
+        let lineEnding: LineEnding = snap.lineEnding === "\r\n" ? "\r\n" : "\n";
+        let encoding = normalizeEncoding(snap.encoding);
 
         if (path && isTauri()) {
           try {
             const opened = await readDocument(path);
-            if (snap.dirty && snap.content && snap.content !== opened.content) {
+            lineEnding = detectLineEnding(opened.content);
+            encoding = normalizeEncoding(opened.encoding);
+            if (snap.dirty && snap.content && !sameText(snap.content, opened.content)) {
               content = snap.content;
               dirtyValue = true;
             } else {
@@ -989,6 +1229,8 @@ export default function App() {
           dirty: dirtyValue,
           state,
           scrollTop: snap.scrollTop,
+          lineEnding,
+          encoding,
         });
         if (path) rememberRecent(path);
       }
@@ -1034,11 +1276,18 @@ export default function App() {
         tab.id === activeId && editor
           ? editor.text()
           : (tab.state?.doc.toString() ?? "");
-      if (current === opened.content) {
+      if (sameText(current, opened.content)) {
+        const lineEnding = detectLineEnding(opened.content);
+        if (tab.lineEnding !== lineEnding) {
+          setTabs((items) =>
+            items.map((item) => (item.id === tab.id ? { ...item, lineEnding } : item)),
+          );
+        }
         if (isTauri()) await touchFileWatchBaseline(tab.path);
         return;
       }
 
+      const lineEnding = detectLineEnding(opened.content);
       if (tab.id === activeId && editor) {
         const scrollTop = editor.getScrollTop();
         const selection = editor.getSelection();
@@ -1048,7 +1297,7 @@ export default function App() {
         setTabs((current) =>
           current.map((item) =>
             item.id === tab.id
-              ? { ...item, dirty: false, state: editor!.getState(), scrollTop }
+              ? { ...item, dirty: false, state: editor!.getState(), scrollTop, lineEnding }
               : item,
           ),
         );
@@ -1061,7 +1310,7 @@ export default function App() {
         const state = editor.createState(opened.content);
         setTabs((current) =>
           current.map((item) =>
-            item.id === tab.id ? { ...item, dirty: false, state } : item,
+            item.id === tab.id ? { ...item, dirty: false, state, lineEnding } : item,
           ),
         );
       }
@@ -1118,6 +1367,7 @@ export default function App() {
       setNotice(`编辑器启动失败：${errorText(error)}`);
       return;
     }
+    applyEditorPrefs();
 
     void (async () => {
       const restored = await restoreSession();
@@ -1131,6 +1381,8 @@ export default function App() {
             dirty: false,
             state: editor!.getState(),
             scrollTop: 0,
+            lineEnding: "\n",
+            encoding: "utf-8",
           },
         ]);
         setActiveTabId(firstId);
@@ -1164,38 +1416,34 @@ export default function App() {
     }, 2000);
 
     const onKeyDown = (event: KeyboardEvent) => {
-      const key = event.key.toLowerCase();
-      if (event.key === "Escape") closeMenu();
-      if (!(event.ctrlKey || event.metaKey) || event.altKey) return;
-      if (key === "s" && event.shiftKey) {
-        event.preventDefault();
-        void saveAs();
-      } else if (key === "s") {
-        event.preventDefault();
-        void save();
-      } else if (key === "o" && event.shiftKey) {
-        event.preventDefault();
-        void openFolder();
-      } else if (key === "o") {
-        event.preventDefault();
-        void openDoc();
-      } else if (key === "n") {
-        event.preventDefault();
-        newDoc();
-      } else if (key === "w") {
-        event.preventDefault();
-        void closeTab(activeId);
-      } else if (key === "\\") {
-        event.preventDefault();
-        patchPrefs({ panelOpen: !prefs().panelOpen });
-      } else if (key === "t") {
-        event.preventDefault();
-        newDoc();
-      } else if (!event.shiftKey && (event.code === "Slash" || event.key === "/")) {
+      if (event.key === "Escape") {
+        closeMenu();
+        setPaletteOpen(false);
+        if (!document.querySelector(".settings-dialog.recording")) setSettingsOpen(false);
+      }
+      if (document.querySelector(".settings-dialog.recording")) return;
+      const target = event.target as HTMLElement | null;
+      if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA")) return;
+      const chord = chordFromEvent(event);
+      if (!chord) return;
+      const hit = (id: ShortcutId) => shortcut(id) === chord;
+      const run = (fn: () => void) => {
         event.preventDefault();
         event.stopPropagation();
-        toggleMode("sourceMode");
+        fn();
+      };
+      if (hit("saveAs")) return run(() => void saveAs());
+      if (hit("save")) return run(() => void save());
+      if (hit("openFolder")) return run(() => void openFolder());
+      if (hit("open")) return run(() => void openDoc());
+      if (hit("newFile") || (shortcut("newFile") === "Ctrl+T" && chord === "Ctrl+N")) {
+        return run(() => newDoc());
       }
+      if (hit("closeTab")) return run(() => void closeTab(activeId));
+      if (hit("toggleSidebar")) return run(() => patchPrefs({ panelOpen: !prefs().panelOpen }));
+      if (hit("sourceMode")) return run(() => toggleMode("sourceMode"));
+      if (hit("commandPalette")) return run(() => setPaletteOpen(true));
+      if (hit("settings")) return run(() => setSettingsOpen(true));
     };
     window.addEventListener("keydown", onKeyDown, true);
     window.addEventListener("click", closeMenu);
@@ -1203,6 +1451,7 @@ export default function App() {
 
     let unlistenClose: (() => void) | undefined;
     let unlistenChange: (() => void) | undefined;
+    let unlistenDrop: (() => void) | undefined;
     if (isTauri()) {
       void listen<number>("mosharp-confirm-close", (event) => {
         const token = event.payload;
@@ -1242,7 +1491,61 @@ export default function App() {
       }).then((stop) => {
         unlistenChange = stop;
       });
+
+      void getCurrentWebview()
+        .onDragDropEvent((event) => {
+          const kind = event.payload.type;
+          if (kind === "enter") setDropHover(true);
+          else if (kind === "leave") setDropHover(false);
+          else if (kind === "drop") {
+            setDropHover(false);
+            void openDroppedPaths(event.payload.paths);
+          }
+        })
+        .then((stop) => {
+          unlistenDrop = stop;
+        });
     }
+
+    const hasFiles = (event: DragEvent) =>
+      Array.from(event.dataTransfer?.types ?? []).includes("Files");
+    const onDragEnter = (event: DragEvent) => {
+      if (!hasFiles(event)) return;
+      event.preventDefault();
+      setDropHover(true);
+    };
+    const onDragOver = (event: DragEvent) => {
+      if (!hasFiles(event)) return;
+      event.preventDefault();
+      if (event.dataTransfer) event.dataTransfer.dropEffect = "copy";
+    };
+    const onDragLeave = (event: DragEvent) => {
+      if (!hasFiles(event)) return;
+      const next = event.relatedTarget;
+      if (next instanceof Node && document.documentElement.contains(next)) return;
+      setDropHover(false);
+    };
+    const onFileDrop = (event: DragEvent) => {
+      if (!hasFiles(event)) return;
+      event.preventDefault();
+      event.stopPropagation();
+      setDropHover(false);
+      const files = Array.from(event.dataTransfer?.files ?? []);
+      if (!files.length) return;
+      const nativePaths = files
+        .map((file) => (file as File & { path?: string }).path)
+        .filter((path): path is string => Boolean(path));
+      if (nativePaths.length) {
+        void openDroppedPaths(nativePaths);
+        return;
+      }
+      if (isTauri()) return;
+      void openDroppedFiles(files);
+    };
+    window.addEventListener("dragenter", onDragEnter);
+    window.addEventListener("dragover", onDragOver);
+    window.addEventListener("dragleave", onDragLeave);
+    window.addEventListener("drop", onFileDrop, true);
 
     onCleanup(() => {
       flushSession();
@@ -1256,6 +1559,11 @@ export default function App() {
       if (scrollUiTimer) clearTimeout(scrollUiTimer);
       unlistenClose?.();
       unlistenChange?.();
+      unlistenDrop?.();
+      window.removeEventListener("dragenter", onDragEnter);
+      window.removeEventListener("dragover", onDragOver);
+      window.removeEventListener("dragleave", onDragLeave);
+      window.removeEventListener("drop", onFileDrop, true);
       editor?.destroy();
     });
   });
@@ -1270,9 +1578,79 @@ export default function App() {
   }
 
   const flatTree = createMemo(() => flattenTree(tree()));
+  const visibleFiles = createMemo(() => {
+    const query = fileQuery().trim().toLowerCase();
+    const nodes = flatTree();
+    if (!query) return nodes;
+    return nodes.filter((node) => node.name.toLowerCase().includes(query));
+  });
+
+  function paletteActions(): PaletteAction[] {
+    const actions: PaletteAction[] = [];
+    const walk = (items: MenuEntry[], prefix: string) => {
+      for (const item of items) {
+        if (item.sep || !item.label) continue;
+        if (item.children?.length) walk(item.children, `${prefix}${item.label} / `);
+        if (item.run && !item.children?.length) {
+          actions.push({
+            id: item.id,
+            label: `${prefix}${item.label}`,
+            shortcut: item.shortcut,
+            run: item.run,
+          });
+        }
+      }
+    };
+    for (const menu of menus()) walk(menu.items, `${menu.label} / `);
+    return actions;
+  }
+
+  let appliedEditorPrefs = "";
+  createEffect(() => {
+    const current = prefs();
+    const key = [
+      current.sourceMode,
+      current.typewriter,
+      current.focusMode,
+      current.spellcheck,
+      current.spellLang,
+      current.footnotes,
+      current.emoji,
+      current.superSub,
+      current.pandocMath,
+      current.customWords,
+      current.pasteImages,
+      current.locale,
+      JSON.stringify(current.shortcuts),
+    ].join("|");
+    if (!editor || key === appliedEditorPrefs) return;
+    appliedEditorPrefs = key;
+    applyEditorPrefs();
+  });
 
   return (
     <div class="app">
+      <Show when={dropHover()}>
+        <div class="drop-overlay" role="status">
+          {t(locale(), "dropToOpen")}
+        </div>
+      </Show>
+      <Show when={paletteOpen()}>
+        <CommandPalette
+          actions={paletteActions()}
+          placeholder={t(locale(), "commandPalette")}
+          empty={t(locale(), "noCommand")}
+          onClose={() => setPaletteOpen(false)}
+        />
+      </Show>
+      <Show when={settingsOpen()}>
+        <SettingsDialog
+          locale={locale()}
+          prefs={prefs()}
+          onChange={patchPrefs}
+          onClose={() => setSettingsOpen(false)}
+        />
+      </Show>
       <header class="chrome">
         <div class="titlebar">
         <div class="chrome-brand" data-tauri-drag-region>
@@ -1329,13 +1707,13 @@ export default function App() {
         </div>
         <div class="chrome-drag" data-tauri-drag-region />
         <div class="window-controls">
-          <button type="button" class="win-btn" title="最小化" onClick={() => void minimizeWindow()}>
+          <button type="button" class="win-btn" title={t(locale(), "minimize")} onClick={() => void minimizeWindow()}>
             <span class="win-min" aria-hidden="true" />
           </button>
-          <button type="button" class="win-btn" title="最大化" onClick={() => void toggleWindow()}>
+          <button type="button" class="win-btn" title={t(locale(), "maximize")} onClick={() => void toggleWindow()}>
             <span class="win-max" aria-hidden="true" />
           </button>
-          <button type="button" class="win-btn win-close" title="关闭" onClick={() => void closeWindow()}>
+          <button type="button" class="win-btn win-close" title={t(locale(), "close")} onClick={() => void closeWindow()}>
             <span class="win-x" aria-hidden="true" />
           </button>
         </div>
@@ -1367,6 +1745,15 @@ export default function App() {
                 {t(locale(), "outline")}
               </button>
             </div>
+            <Show when={prefs().panelMode === "files"}>
+              <input
+                class="side-search"
+                type="search"
+                placeholder={t(locale(), "searchFiles")}
+                value={fileQuery()}
+                onInput={(event) => setFileQuery(event.currentTarget.value)}
+              />
+            </Show>
             <div class="side-body">
               <Show
                 when={prefs().panelMode === "files"}
@@ -1397,7 +1784,7 @@ export default function App() {
                   when={prefs().workspaceRoot}
                   fallback={<p class="side-empty">{t(locale(), "emptyFolder")}</p>}
                 >
-                  <For each={flatTree()}>
+                  <For each={visibleFiles()}>
                     {(node) => (
                       <button
                         type="button"

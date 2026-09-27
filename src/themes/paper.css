@@ -1,0 +1,53 @@
+/* 纸色 (Paper)
+   scheme: light
+   set: app
+   变量说明见同目录 README.md。 */
+html[data-theme="paper"] {
+  color-scheme: light;
+  --paper: #f7f5f0;
+  --ink: #1c1917;
+  --muted: #78716c;
+  --faint: #a8a29e;
+  --line: #e7e5e4;
+  --bar: #fafaf9;
+  --chrome: #f3f2ef;
+  --accent: #9a3412;
+  --link: #1d4ed8;
+  --menu: #ffffff;
+  --hover: #eceae6;
+  --side: #fafaf8;
+  --code-bg: rgba(159, 18, 57, 0.08);
+  --code-block: #f3f1ec;
+  --code-ink: #9f1239;
+  --code-block-ink: #1c1917;
+  --quote: #44403c;
+  --quote-border: #d6d3d1;
+  --highlight: rgba(250, 204, 21, 0.45);
+  --selection: #d6d3d1;
+  --danger: #c42b1c;
+  --on-danger: #ffffff;
+  --h1: #9a3412;
+  --h2: #9a3412;
+  --h3: #c2410c;
+  --h4: #c2410c;
+  --h1-size: 1.7em;
+  --h2-size: 1.4em;
+  --h3-size: 1.2em;
+  --h4-size: 1.05em;
+  --table-border: #e7e5e4;
+  --table-head: #efece6;
+  --table-head-ink: #1c1917;
+  --table-stripe: rgba(28, 25, 23, 0.035);
+  --math: #9a3412;
+  --math-bg: rgba(154, 52, 18, 0.07);
+  --rule: #d6d3d1;
+  --marker: #9a3412;
+  --strong: #1c1917;
+  --em: #44403c;
+  --syn-keyword: #7c3aed;
+  --syn-string: #9f1239;
+  --syn-number: #b45309;
+  --syn-comment: #a8a29e;
+  --editor-font: "Segoe UI", "Microsoft YaHei UI", "Microsoft YaHei", sans-serif;
+  --editor-size: 17px;
+}

@@ -1,0 +1,15 @@
+import "./paper.css";
+import "./light.css";
+import "./elegant.css";
+import "./notion.css";
+import "./writer.css";
+import "./bear.css";
+import "./sepia.css";
+import "./cadmium-light.css";
+import "./dark.css";
+import "./midnight.css";
+import "./solarized-dark.css";
+import "./nord.css";
+import "./gruvbox.css";
+import "./dracula.css";
+import "./material-dark.css";

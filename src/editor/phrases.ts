@@ -1,21 +1,103 @@
-export type EditorLocale = "zh-CN" | "en";
+import type { Locale } from "../shell/preferences";
 
-/** CodeMirror search panel labels. Chinese UI names the whole-word toggle explicitly. */
-export function searchPhrases(locale: EditorLocale): Record<string, string> {
-  if (locale === "en") return {};
-  return {
-    Find: "查找",
-    Replace: "替换",
-    next: "下一个",
-    previous: "上一个",
+export type EditorLocale = Locale;
+
+const zhCN = {
+  Find: "查找",
+  Replace: "替换",
+  next: "下一个",
+  previous: "上一个",
+  all: "全部",
+  "match case": "区分大小写",
+  regexp: "正则",
+  "by word": "全字匹配",
+  replace: "替换",
+  "replace all": "全部替换",
+  close: "关闭",
+  "Go to line": "跳到行",
+  go: "跳转",
+};
+
+const phrases: Record<Locale, Record<string, string>> = {
+  "zh-CN": zhCN,
+  "zh-TW": {
+    Find: "尋找",
+    Replace: "取代",
+    next: "下一個",
+    previous: "上一個",
     all: "全部",
-    "match case": "区分大小写",
-    regexp: "正则",
-    "by word": "全字匹配",
-    replace: "替换",
-    "replace all": "全部替换",
-    close: "关闭",
+    "match case": "區分大小寫",
+    regexp: "正則",
+    "by word": "全字比對",
+    replace: "取代",
+    "replace all": "全部取代",
+    close: "關閉",
     "Go to line": "跳到行",
-    go: "跳转",
-  };
+    go: "跳轉",
+  },
+  en: {},
+  ja: {
+    Find: "検索",
+    Replace: "置換",
+    next: "次へ",
+    previous: "前へ",
+    all: "すべて",
+    "match case": "大文字小文字を区別",
+    regexp: "正規表現",
+    "by word": "単語単位",
+    replace: "置換",
+    "replace all": "すべて置換",
+    close: "閉じる",
+    "Go to line": "行へ移動",
+    go: "移動",
+  },
+  de: {
+    Find: "Suchen",
+    Replace: "Ersetzen",
+    next: "Weiter",
+    previous: "Zurück",
+    all: "Alle",
+    "match case": "Groß-/Kleinschreibung",
+    regexp: "Regex",
+    "by word": "Ganzes Wort",
+    replace: "Ersetzen",
+    "replace all": "Alle ersetzen",
+    close: "Schließen",
+    "Go to line": "Gehe zu Zeile",
+    go: "Gehe",
+  },
+  fr: {
+    Find: "Rechercher",
+    Replace: "Remplacer",
+    next: "Suivant",
+    previous: "Précédent",
+    all: "Tout",
+    "match case": "Respecter la casse",
+    regexp: "Regex",
+    "by word": "Mot entier",
+    replace: "Remplacer",
+    "replace all": "Tout remplacer",
+    close: "Fermer",
+    "Go to line": "Aller à la ligne",
+    go: "Aller",
+  },
+  es: {
+    Find: "Buscar",
+    Replace: "Reemplazar",
+    next: "Siguiente",
+    previous: "Anterior",
+    all: "Todo",
+    "match case": "Coincidir mayúsculas",
+    regexp: "Regex",
+    "by word": "Palabra completa",
+    replace: "Reemplazar",
+    "replace all": "Reemplazar todo",
+    close: "Cerrar",
+    "Go to line": "Ir a la línea",
+    go: "Ir",
+  },
+};
+
+export function searchPhrases(locale: EditorLocale): Record<string, string> {
+  return phrases[locale] ?? zhCN;
 }

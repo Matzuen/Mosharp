@@ -1,5 +1,3 @@
-import { EditorView, WidgetType } from "@codemirror/view";
-
 const MAX_SOURCE = 20_000;
 
 let mermaidLoader: Promise<typeof import("mermaid").default> | null = null;
@@ -20,85 +18,47 @@ function themeVariables() {
   return { paper, ink, accent, line };
 }
 
-export class MermaidWidget extends WidgetType {
-  constructor(readonly source: string) {
-    super();
-  }
+export const DIAGRAM_TOO_BIG = "图表太大，滚到源码模式再看";
+export const DIAGRAM_FAILED = "图表还画不出来，点这里改源码";
 
-  eq(other: MermaidWidget) {
-    return this.source === other.source;
+export function mountMermaid(el: HTMLElement, source: string, alive: () => boolean): void {
+  if (source.length > MAX_SOURCE) {
+    el.textContent = DIAGRAM_TOO_BIG;
+    return;
   }
-
-  get estimatedHeight() {
-    return 180;
-  }
-
-  toDOM(view: EditorView) {
-    const el = document.createElement("div");
-    el.className = "cm-md-mermaid";
-    el.title = "点击编辑源码";
-    const token = {};
-    (el as HTMLElement & { _token?: object })._token = token;
-    if (this.source.length > MAX_SOURCE) {
-      el.textContent = "图表太大，滚到源码模式再看";
-      return el;
-    }
-    const source = this.source;
-    const colors = themeVariables();
-    void loadMermaid()
-      .then(async (mermaid) => {
-        if ((el as HTMLElement & { _token?: object })._token !== token || !el.isConnected) return;
-        mermaid.initialize({
-          startOnLoad: false,
-          securityLevel: "strict",
-          theme: "base",
-          fontFamily: '"Segoe UI", "Microsoft YaHei UI", sans-serif',
-          themeVariables: {
-            background: colors.paper,
-            primaryColor: colors.paper,
-            primaryTextColor: colors.ink,
-            primaryBorderColor: colors.accent,
-            lineColor: colors.ink,
-            textColor: colors.ink,
-            secondaryColor: colors.paper,
-            tertiaryColor: colors.paper,
-            clusterBkg: colors.paper,
-            edgeLabelBackground: colors.paper,
-            nodeTextColor: colors.ink,
-          },
-        });
-        const id = `mosharp-mermaid-${++renderNonce}`;
-        const drawn = await mermaid.render(id, source);
-        if ((el as HTMLElement & { _token?: object })._token !== token || !el.isConnected) {
-          drawn.bindFunctions?.(document.createElement("div"));
-          return;
-        }
-        el.innerHTML = drawn.svg;
-      })
-      .catch(() => {
-        if ((el as HTMLElement & { _token?: object })._token !== token) return;
-        el.textContent = "图表还画不出来，点这里改源码";
+  const colors = themeVariables();
+  void loadMermaid()
+    .then(async (mermaid) => {
+      if (!alive() || !el.isConnected) return;
+      mermaid.initialize({
+        startOnLoad: false,
+        securityLevel: "strict",
+        theme: "base",
+        fontFamily: '"Segoe UI", "Microsoft YaHei UI", sans-serif',
+        themeVariables: {
+          background: colors.paper,
+          primaryColor: colors.paper,
+          primaryTextColor: colors.ink,
+          primaryBorderColor: colors.accent,
+          lineColor: colors.ink,
+          textColor: colors.ink,
+          secondaryColor: colors.paper,
+          tertiaryColor: colors.paper,
+          clusterBkg: colors.paper,
+          edgeLabelBackground: colors.paper,
+          nodeTextColor: colors.ink,
+        },
       });
-    el.addEventListener("mousedown", (event) => {
-      event.preventDefault();
-      event.stopPropagation();
-      const pos = view.posAtDOM(el);
-      if (pos == null) return;
-      const line = view.state.doc.lineAt(pos);
-      const nextNo = Math.min(view.state.doc.lines, line.number + 1);
-      const anchor = view.state.doc.line(nextNo).from;
-      view.dispatch({ selection: { anchor } });
-      view.focus();
+      const id = `mosharp-mermaid-${++renderNonce}`;
+      const drawn = await mermaid.render(id, source);
+      if (!alive() || !el.isConnected) {
+        drawn.bindFunctions?.(document.createElement("div"));
+        return;
+      }
+      el.innerHTML = drawn.svg;
+    })
+    .catch(() => {
+      if (!alive()) return;
+      el.textContent = DIAGRAM_FAILED;
     });
-    return el;
-  }
-
-  destroy(dom: HTMLElement) {
-    (dom as HTMLElement & { _token?: object })._token = undefined;
-    dom.replaceChildren();
-  }
-
-  ignoreEvent() {
-    return true;
-  }
 }

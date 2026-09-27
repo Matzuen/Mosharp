@@ -1,0 +1,53 @@
+/* 德古拉 (Dracula)
+   scheme: dark
+   set: colamd
+   变量说明见同目录 README.md。 */
+html[data-theme="dracula"] {
+  color-scheme: dark;
+  --paper: #282a36;
+  --ink: #f8f8f2;
+  --muted: #afb7db;
+  --faint: #7f86a8;
+  --line: #3d4051;
+  --bar: #343746;
+  --chrome: #343746;
+  --accent: #bd93f9;
+  --link: #bd93f9;
+  --menu: #343746;
+  --hover: rgba(255, 255, 255, 0.08);
+  --side: #21222c;
+  --code-bg: rgba(98, 114, 164, 0.28);
+  --code-block: #21222c;
+  --code-ink: #8be9fd;
+  --code-block-ink: #f8f8f2;
+  --quote: #c3c8e0;
+  --quote-border: #ff79c6;
+  --highlight: rgba(241, 250, 140, 0.28);
+  --selection: rgba(189, 147, 249, 0.32);
+  --danger: #ff5555;
+  --on-danger: #ffffff;
+  --h1: #bd93f9;
+  --h2: #f8f8f2;
+  --h3: #ff79c6;
+  --h4: #f1fa8c;
+  --h1-size: 1.7em;
+  --h2-size: 1.4em;
+  --h3-size: 1.2em;
+  --h4-size: 1.05em;
+  --table-border: #44475a;
+  --table-head: #343746;
+  --table-head-ink: #bd93f9;
+  --table-stripe: rgba(189, 147, 249, 0.08);
+  --math: #8be9fd;
+  --math-bg: #21222c;
+  --rule: #ff79c6;
+  --marker: #bd93f9;
+  --strong: #f8f8f2;
+  --em: #f1fa8c;
+  --syn-keyword: #ff79c6;
+  --syn-string: #f1fa8c;
+  --syn-number: #bd93f9;
+  --syn-comment: #6272a4;
+  --editor-font: "Segoe UI", "Microsoft YaHei UI", "Microsoft YaHei", sans-serif;
+  --editor-size: 17px;
+}

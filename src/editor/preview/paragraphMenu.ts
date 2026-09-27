@@ -94,14 +94,14 @@ export const paragraphMenuTheme = EditorView.baseTheme({
     height: "18px",
     border: "none",
     background: "transparent",
-    color: "#a8a29e",
+    color: "var(--faint)",
     cursor: "pointer",
     padding: "0",
     fontSize: "12px",
     lineHeight: "18px",
   },
   ".cm-para-handle:hover": {
-    color: "#1c1917",
+    color: "var(--ink)",
   },
   ".cm-para-menu": {
     position: "absolute",
@@ -109,8 +109,9 @@ export const paragraphMenuTheme = EditorView.baseTheme({
     minWidth: "120px",
     padding: "4px",
     borderRadius: "8px",
-    border: "1px solid #e7e5e4",
-    background: "#fff",
+    border: "1px solid var(--line)",
+    background: "var(--menu)",
+    color: "var(--ink)",
     boxShadow: "0 8px 20px rgba(28,25,23,0.12)",
   },
   ".cm-para-menu button": {
@@ -126,7 +127,7 @@ export const paragraphMenuTheme = EditorView.baseTheme({
     fontSize: "12px",
   },
   ".cm-para-menu button:hover": {
-    background: "#eceae6",
+    background: "var(--hover)",
   },
 });
 

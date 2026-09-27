@@ -1,0 +1,53 @@
+/* 雅致 (Elegant)
+   scheme: light
+   set: colamd
+   变量说明见同目录 README.md。 */
+html[data-theme="elegant"] {
+  color-scheme: light;
+  --paper: #f0edea;
+  --ink: #2c2c2c;
+  --muted: #6c6c6c;
+  --faint: #777777;
+  --line: #dedad5;
+  --bar: #eae6e1;
+  --chrome: #e7e2dc;
+  --accent: #c44b2b;
+  --link: #bc4424;
+  --menu: #f7f4f1;
+  --hover: #e4dfd9;
+  --side: #eae6e1;
+  --code-bg: #e8e4df;
+  --code-block: #2c2c2c;
+  --code-ink: #c44b2b;
+  --code-block-ink: #e0dcd7;
+  --quote: #6c6c6c;
+  --quote-border: #c44b2b;
+  --highlight: #f0d9a8;
+  --selection: rgba(196, 75, 43, 0.2);
+  --danger: #c42b1c;
+  --on-danger: #ffffff;
+  --h1: #c44b2b;
+  --h2: #2c2c2c;
+  --h3: #c44b2b;
+  --h4: #6c6c6c;
+  --h1-size: 1.95em;
+  --h2-size: 1.55em;
+  --h3-size: 1.28em;
+  --h4-size: 1.08em;
+  --table-border: #dedad5;
+  --table-head: #e4dfd9;
+  --table-head-ink: #2c2c2c;
+  --table-stripe: rgba(196, 75, 43, 0.05);
+  --math: #c44b2b;
+  --math-bg: #e8e4df;
+  --rule: #c44b2b;
+  --marker: #c44b2b;
+  --strong: #2c2c2c;
+  --em: #6c6c6c;
+  --syn-keyword: #c44b2b;
+  --syn-string: #6b4f3a;
+  --syn-number: #9c5e29;
+  --syn-comment: #8a847e;
+  --editor-font: Georgia, "Source Han Serif SC", "Noto Serif SC", "Songti SC", serif;
+  --editor-size: 17px;
+}

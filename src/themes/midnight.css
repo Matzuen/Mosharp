@@ -1,0 +1,53 @@
+/* 午夜 (Midnight)
+   scheme: dark
+   set: colamd
+   变量说明见同目录 README.md。 */
+html[data-theme="midnight"] {
+  color-scheme: dark;
+  --paper: #000000;
+  --ink: #d6d6d6;
+  --muted: #b1b1b1;
+  --faint: #7a7a7a;
+  --line: #1c1c1c;
+  --bar: #0a0a0a;
+  --chrome: #0a0a0a;
+  --accent: #0a84ff;
+  --link: #0a84ff;
+  --menu: #111111;
+  --hover: rgba(255, 255, 255, 0.08);
+  --side: #000000;
+  --code-bg: rgba(255, 255, 255, 0.08);
+  --code-block: #111111;
+  --code-ink: #d6d6d6;
+  --code-block-ink: #d6d6d6;
+  --quote: #9a9a9a;
+  --quote-border: #3a3a3a;
+  --highlight: rgba(255, 214, 10, 0.28);
+  --selection: rgba(10, 132, 255, 0.32);
+  --danger: #ff453a;
+  --on-danger: #ffffff;
+  --h1: #0a84ff;
+  --h2: #d6d6d6;
+  --h3: #64b5ff;
+  --h4: #9a9a9a;
+  --h1-size: 1.6em;
+  --h2-size: 1.32em;
+  --h3-size: 1.15em;
+  --h4-size: 1.02em;
+  --table-border: #2a2a2a;
+  --table-head: #111111;
+  --table-head-ink: #d6d6d6;
+  --table-stripe: rgba(10, 132, 255, 0.08);
+  --math: #64d2ff;
+  --math-bg: #111111;
+  --rule: #3a3a3a;
+  --marker: #0a84ff;
+  --strong: #ffffff;
+  --em: #b1b1b1;
+  --syn-keyword: #ff9f0a;
+  --syn-string: #64d2ff;
+  --syn-number: #30d158;
+  --syn-comment: #7a7a7a;
+  --editor-font: "Segoe UI", "Microsoft YaHei UI", "Microsoft YaHei", sans-serif;
+  --editor-size: 17px;
+}

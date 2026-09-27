@@ -9,6 +9,8 @@ export interface SessionTabSnapshot {
   dirty: boolean;
   scrollTop: number;
   selection: { anchor: number; head: number };
+  lineEnding?: "\n" | "\r\n";
+  encoding?: string;
 }
 
 export interface SessionSnapshot {

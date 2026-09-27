@@ -15,7 +15,7 @@ import {
   syntaxHighlighting,
 } from "@codemirror/language";
 import { highlightSelectionMatches, search, searchKeymap } from "@codemirror/search";
-import { Compartment, EditorState, type Extension } from "@codemirror/state";
+import { Compartment, EditorState, Transaction, type Extension } from "@codemirror/state";
 import {
   drawSelection,
   EditorView,
@@ -24,6 +24,7 @@ import {
   keymap,
   lineNumbers,
 } from "@codemirror/view";
+import { lineChanges } from "./fidelity";
 import { markdownHighlightStyle } from "./highlight";
 import { searchPhrases, type EditorLocale } from "./phrases";
 import { flashEffect, flashField } from "./preview/flash";
@@ -31,6 +32,7 @@ import { HighlightExtension } from "./preview/highlightExt";
 import { linkClickHandler, linkModCursor } from "./preview/links";
 import { setActiveDocumentPath } from "./preview/docPath";
 import { pasteImageHandler } from "./preview/images";
+import { setPandocMath } from "./preview/math";
 import {
   hiddenLineNumberField,
   livePreviewPlugin,
@@ -51,7 +53,14 @@ import {
   paragraphGutterRefresh,
   paragraphMenuTheme,
 } from "./preview/paragraphMenu";
-import { formatKeymap } from "./preview/formatCommands";
+import { formatKeymapFrom } from "./preview/formatCommands";
+import {
+  defaultWritingOptions,
+  writingConfig,
+  writingPreview,
+  type WritingOptions,
+} from "./preview/writingPreview";
+import { DEFAULT_SHORTCUTS, type ShortcutMap } from "../shell/preferences";
 import { richCopyHandler } from "./preview/richCopy";
 import { slashMenuPlugin, slashMenuTheme } from "./preview/slashMenu";
 import { formatToolbarPlugin, formatToolbarTheme } from "./preview/toolbar";
@@ -116,12 +125,19 @@ export interface EditorController {
   onScroll: (listener: () => void) => () => void;
   onUpdate: (listener: () => void) => () => void;
   replace: (text: string) => number;
+  /** Apply a fidelity rewrite without marking the document dirty. */
+  rewrite: (text: string) => void;
   measureInput: () => number[];
   measureScroll: () => Promise<number>;
   getModes: () => PreviewModes;
   setModes: (partial: Partial<PreviewModes>) => void;
   setPhrases: (locale: EditorLocale) => void;
+  refreshDecorations: () => void;
+  remeasure: () => void;
   setDocumentPath: (path: string | null) => void;
+  setSpellcheck: (enabled: boolean, lang: string) => void;
+  setWriting: (options: WritingOptions, pandocMath: boolean) => void;
+  setFormatKeys: (shortcuts: ShortcutMap) => void;
   run: (action: (view: EditorView) => void) => void;
 }
 
@@ -131,6 +147,9 @@ function buildExtensions(
     shouldIgnoreEdit: () => boolean;
   },
   phraseCompartment: Compartment,
+  spellCompartment: Compartment,
+  keyCompartment: Compartment,
+  writingCompartment: Compartment,
   locale: EditorLocale,
 ): Extension[] {
   return [
@@ -155,9 +174,9 @@ function buildExtensions(
     syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
     search({ top: true }),
     highlightSelectionMatches({ wholeWords: false }),
+    keyCompartment.of(keymap.of(formatKeymapFrom(DEFAULT_SHORTCUTS))),
     keymap.of([
       indentWithTab,
-      ...formatKeymap,
       ...defaultKeymap,
       ...historyKeymap,
       ...searchKeymap,
@@ -177,6 +196,8 @@ function buildExtensions(
     paragraphMenuTheme,
     linkClickHandler,
     linkModCursor,
+    ...writingPreview,
+    writingCompartment.of(writingConfig.of(defaultWritingOptions)),
     richCopyHandler,
     editorTheme,
     flashField,
@@ -184,11 +205,14 @@ function buildExtensions(
     EditorView.domEventHandlers({
       paste: pasteImageHandler,
     }),
-    EditorView.contentAttributes.of({
-      spellcheck: "false",
-      autocorrect: "off",
-      autocapitalize: "off",
-    }),
+    spellCompartment.of(
+      EditorView.contentAttributes.of({
+        spellcheck: "true",
+        lang: "zh-CN",
+        autocorrect: "off",
+        autocapitalize: "off",
+      }),
+    ),
     EditorView.updateListener.of((update) => {
       if (hooks.shouldIgnoreEdit() || !update.docChanged) return;
       hooks.onEdit();
@@ -202,6 +226,9 @@ export function createEditor(
 ): EditorController {
   let applying = false;
   const phraseCompartment = new Compartment();
+  const spellCompartment = new Compartment();
+  const keyCompartment = new Compartment();
+  const writingCompartment = new Compartment();
   const modes: PreviewModes = {
     sourceMode: hooks.initialModes?.sourceMode ?? false,
     typewriter: hooks.initialModes?.typewriter ?? false,
@@ -214,6 +241,9 @@ export function createEditor(
       shouldIgnoreEdit: () => applying,
     },
     phraseCompartment,
+    spellCompartment,
+    keyCompartment,
+    writingCompartment,
     hooks.locale ?? "zh-CN",
   );
 
@@ -262,6 +292,18 @@ export function createEditor(
     syncModeEffects();
     notifyUpdate();
     return performance.now() - started;
+  }
+
+  function rewrite(text: string): void {
+    const current = view.state.doc.toString();
+    const changes = lineChanges(current, text);
+    if (changes.length === 0) return;
+    applying = true;
+    view.dispatch({
+      changes,
+      annotations: Transaction.addToHistory.of(false),
+    });
+    applying = false;
   }
 
   function measureInput(): number[] {
@@ -384,6 +426,7 @@ export function createEditor(
       };
     },
     replace,
+    rewrite,
     measureInput,
     measureScroll,
     getModes: () => ({ ...modes }),
@@ -398,9 +441,41 @@ export function createEditor(
         effects: phraseCompartment.reconfigure(EditorState.phrases.of(searchPhrases(locale))),
       });
     },
+    refreshDecorations: () => {
+      view.dispatch({ effects: refreshPreview.of(null) });
+    },
+    remeasure: () => {
+      view.requestMeasure();
+    },
     setDocumentPath: (path) => {
       setActiveDocumentPath(path);
       view.dispatch({ effects: refreshPreview.of(null) });
+    },
+    setSpellcheck: (enabled, lang) => {
+      view.dispatch({
+        effects: spellCompartment.reconfigure(
+          EditorView.contentAttributes.of({
+            spellcheck: enabled ? "true" : "false",
+            lang: enabled ? lang : "",
+            autocorrect: "off",
+            autocapitalize: "off",
+          }),
+        ),
+      });
+    },
+    setWriting: (options, pandocMath) => {
+      setPandocMath(pandocMath);
+      view.dispatch({
+        effects: [
+          writingCompartment.reconfigure(writingConfig.of(options)),
+          refreshPreview.of(null),
+        ],
+      });
+    },
+    setFormatKeys: (shortcuts) => {
+      view.dispatch({
+        effects: keyCompartment.reconfigure(keymap.of(formatKeymapFrom(shortcuts))),
+      });
     },
     run: (action) => {
       action(view);

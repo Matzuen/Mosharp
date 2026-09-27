@@ -181,7 +181,14 @@ function insertAtCursor(view: EditorView, text: string) {
   });
 }
 
+let pasteImages = true;
+
+export function setPasteImages(enabled: boolean) {
+  pasteImages = enabled;
+}
+
 export function pasteImageHandler(event: ClipboardEvent, view: EditorView): boolean {
+  if (!pasteImages) return false;
   const items = event.clipboardData?.items;
   if (!items) return false;
   const image = [...items].find((item) => item.type.startsWith("image/"));

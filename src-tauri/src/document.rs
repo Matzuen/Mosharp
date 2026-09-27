@@ -14,6 +14,7 @@ pub struct OpenedDocument {
     pub path: String,
     pub content: String,
     pub mtime_ms: u64,
+    pub encoding: String,
 }
 
 fn map_io_error(err: std::io::Error, action: &str, path: &Path) -> String {
@@ -54,26 +55,104 @@ pub fn read_document(path: String) -> Result<OpenedDocument, String> {
     if meta.len() > MAX_BYTES {
         return Err(format!("文件有 {} 字节，超过 64MB 上限", meta.len()));
     }
-    let content = fs::read_to_string(&target).map_err(|err| {
-        if err.kind() == std::io::ErrorKind::InvalidData {
-            "文件不是 UTF-8 文本".to_string()
-        } else {
-            map_io_error(err, "打开", &target)
-        }
-    })?;
+    let bytes = fs::read(&target).map_err(|err| map_io_error(err, "打开", &target))?;
+    let (content, encoding) = decode_bytes(&bytes)?;
     Ok(OpenedDocument {
         path,
         content,
+        encoding,
         mtime_ms: file_mtime_ms(&target),
     })
 }
 
+fn decode_bytes(bytes: &[u8]) -> Result<(String, String), String> {
+    if bytes.starts_with(&[0xEF, 0xBB, 0xBF]) {
+        let text = std::str::from_utf8(&bytes[3..]).map_err(|_| "文件不是 UTF-8 文本".to_string())?;
+        return Ok((text.to_string(), "utf-8-bom".to_string()));
+    }
+    if bytes.starts_with(&[0xFF, 0xFE]) {
+        return Ok((decode_utf16(&bytes[2..], true)?, "utf-16le".to_string()));
+    }
+    if bytes.starts_with(&[0xFE, 0xFF]) {
+        return Ok((decode_utf16(&bytes[2..], false)?, "utf-16be".to_string()));
+    }
+    if let Ok(text) = std::str::from_utf8(bytes) {
+        return Ok((text.to_string(), "utf-8".to_string()));
+    }
+    let (text, _, had_errors) = encoding_rs::GBK.decode(bytes);
+    if had_errors {
+        return Err("无法识别文件编码（已尝试 UTF-8、UTF-16、GBK）".to_string());
+    }
+    Ok((text.into_owned(), "gbk".to_string()))
+}
+
+fn decode_utf16(bytes: &[u8], little: bool) -> Result<String, String> {
+    if bytes.len() % 2 != 0 {
+        return Err("UTF-16 字节长度不正确".to_string());
+    }
+    let units: Vec<u16> = bytes
+        .chunks_exact(2)
+        .map(|chunk| {
+            if little {
+                u16::from_le_bytes([chunk[0], chunk[1]])
+            } else {
+                u16::from_be_bytes([chunk[0], chunk[1]])
+            }
+        })
+        .collect();
+    String::from_utf16(&units).map_err(|_| "UTF-16 内容无法解码".to_string())
+}
+
+fn encode_text(content: &str, encoding: &str) -> Result<Vec<u8>, String> {
+    match encoding {
+        "utf-8-bom" => {
+            let mut bytes = vec![0xEF, 0xBB, 0xBF];
+            bytes.extend_from_slice(content.as_bytes());
+            Ok(bytes)
+        }
+        "utf-16le" => Ok(encode_utf16(content, true)),
+        "utf-16be" => Ok(encode_utf16(content, false)),
+        "gbk" => {
+            let (bytes, _, had_errors) = encoding_rs::GBK.encode(content);
+            if had_errors {
+                return Err("有字符无法用 GBK 保存".to_string());
+            }
+            Ok(bytes.into_owned())
+        }
+        _ => Ok(content.as_bytes().to_vec()),
+    }
+}
+
+fn encode_utf16(content: &str, little: bool) -> Vec<u8> {
+    let mut out = Vec::with_capacity(2 + content.len() * 2);
+    out.extend_from_slice(if little { &[0xFF, 0xFE] } else { &[0xFE, 0xFF] });
+    for unit in content.encode_utf16() {
+        let bytes = if little {
+            unit.to_le_bytes()
+        } else {
+            unit.to_be_bytes()
+        };
+        out.extend_from_slice(&bytes);
+    }
+    out
+}
+
 #[tauri::command]
-pub fn write_document(path: String, content: String) -> Result<(), String> {
+pub fn write_bytes(path: String, bytes: Vec<u8>) -> Result<(), String> {
+    write_bytes_atomic(&path, &bytes)
+}
+
+#[tauri::command]
+pub fn write_document(path: String, content: String, encoding: Option<String>) -> Result<(), String> {
+    let bytes = encode_text(&content, encoding.as_deref().unwrap_or("utf-8"))?;
+    write_bytes_atomic(&path, &bytes)
+}
+
+fn write_bytes_atomic(path: &str, bytes: &[u8]) -> Result<(), String> {
     if path.trim().is_empty() {
         return Err("没有保存路径".to_string());
     }
-    let target = PathBuf::from(&path);
+    let target = PathBuf::from(path);
     if let Some(parent) = target.parent() {
         if !parent.as_os_str().is_empty() {
             fs::create_dir_all(parent).map_err(|err| map_io_error(err, "保存", &target))?;
@@ -97,7 +176,7 @@ pub fn write_document(path: String, content: String) -> Result<(), String> {
     let write_result = (|| -> Result<(), String> {
         let mut file =
             File::create(&temp).map_err(|err| map_io_error(err, "保存", &target))?;
-        file.write_all(content.as_bytes())
+        file.write_all(bytes)
             .map_err(|err| map_io_error(err, "保存", &target))?;
         file.sync_all()
             .map_err(|err| map_io_error(err, "保存", &target))?;
@@ -274,8 +353,8 @@ mod tests {
         let path = dir.join("note.md");
         let path_str = path.to_string_lossy().into_owned();
 
-        write_document(path_str.clone(), "第一版\n".to_string()).unwrap();
-        write_document(path_str.clone(), "第二版\n".to_string()).unwrap();
+        write_document(path_str.clone(), "第一版\n".to_string(), None).unwrap();
+        write_document(path_str.clone(), "第二版\n".to_string(), None).unwrap();
         let opened = read_document(path_str).unwrap();
         assert_eq!(opened.content, "第二版\n");
 
@@ -287,6 +366,51 @@ mod tests {
                 .contains("mosharp-tmp")
         });
         assert!(!leftover);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn crlf_roundtrip_keeps_carriage_returns() {
+        let dir = std::env::temp_dir().join(format!("mosharp-crlf-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("note.md");
+        let path_str = path.to_string_lossy().into_owned();
+        let original = "---\r\ntitle: 墨\r\n---\r\n\r\n甲\r\n\r\n***\r\n";
+
+        write_document(path_str.clone(), original.to_string(), None).unwrap();
+        let opened = read_document(path_str).unwrap();
+        assert_eq!(opened.content, original);
+
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn encoding_roundtrip_gbk_utf16_and_bom() {
+        let dir = std::env::temp_dir().join(format!("mosharp-enc-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("note.md");
+        let path_str = path.to_string_lossy().into_owned();
+        let text = "中文\r\n";
+
+        write_document(path_str.clone(), text.to_string(), Some("gbk".to_string())).unwrap();
+        let gbk = std::fs::read(&path).unwrap();
+        assert_eq!(&gbk[..4], &[0xD6, 0xD0, 0xCE, 0xC4]);
+        let opened = read_document(path_str.clone()).unwrap();
+        assert_eq!(opened.encoding, "gbk");
+        assert_eq!(opened.content, text);
+
+        write_document(path_str.clone(), text.to_string(), Some("utf-16le".to_string())).unwrap();
+        let opened = read_document(path_str.clone()).unwrap();
+        assert_eq!(opened.encoding, "utf-16le");
+        assert_eq!(opened.content, text);
+
+        write_document(path_str.clone(), text.to_string(), Some("utf-8-bom".to_string())).unwrap();
+        let opened = read_document(path_str).unwrap();
+        assert_eq!(opened.encoding, "utf-8-bom");
+        assert_eq!(opened.content, text);
+
         std::fs::remove_dir_all(&dir).unwrap();
     }
 }

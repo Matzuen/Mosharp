@@ -1,0 +1,53 @@
+/* 夜航 (Solarized Dark)
+   scheme: dark
+   set: colamd
+   变量说明见同目录 README.md。 */
+html[data-theme="solarized-dark"] {
+  color-scheme: dark;
+  --paper: #002b36;
+  --ink: #c2d5d7;
+  --muted: #a4bbc3;
+  --faint: #586e75;
+  --line: #0a3845;
+  --bar: #073642;
+  --chrome: #073642;
+  --accent: #2aa198;
+  --link: #3093da;
+  --menu: #073642;
+  --hover: rgba(255, 255, 255, 0.08);
+  --side: #00212b;
+  --code-bg: rgba(88, 110, 117, 0.28);
+  --code-block: #073642;
+  --code-ink: #2aa198;
+  --code-block-ink: #c2d5d7;
+  --quote: #a4bbc3;
+  --quote-border: #2aa198;
+  --highlight: rgba(181, 137, 0, 0.35);
+  --selection: rgba(38, 139, 210, 0.32);
+  --danger: #dc322f;
+  --on-danger: #ffffff;
+  --h1: #2aa198;
+  --h2: #c2d5d7;
+  --h3: #b58900;
+  --h4: #93a1a1;
+  --h1-size: 1.7em;
+  --h2-size: 1.4em;
+  --h3-size: 1.2em;
+  --h4-size: 1.05em;
+  --table-border: #0a3845;
+  --table-head: #073642;
+  --table-head-ink: #c2d5d7;
+  --table-stripe: rgba(42, 161, 152, 0.08);
+  --math: #2aa198;
+  --math-bg: #073642;
+  --rule: #2aa198;
+  --marker: #2aa198;
+  --strong: #c2d5d7;
+  --em: #a4bbc3;
+  --syn-keyword: #859900;
+  --syn-string: #2aa198;
+  --syn-number: #d33682;
+  --syn-comment: #586e75;
+  --editor-font: "Segoe UI", "Microsoft YaHei UI", "Microsoft YaHei", sans-serif;
+  --editor-size: 17px;
+}

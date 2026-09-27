@@ -1,0 +1,53 @@
+/* 作家 (Writer)
+   scheme: light
+   set: colamd
+   变量说明见同目录 README.md。 */
+html[data-theme="writer"] {
+  color-scheme: light;
+  --paper: #fcfcfa;
+  --ink: #1a1a1a;
+  --muted: #757571;
+  --faint: #8e8e8a;
+  --line: #e9e9e5;
+  --bar: #f4f4f0;
+  --chrome: #f4f4f0;
+  --accent: #3b6ec4;
+  --link: #3b6ec4;
+  --menu: #ffffff;
+  --hover: #eeeeea;
+  --side: #f4f4f0;
+  --code-bg: rgba(0, 0, 0, 0.05);
+  --code-block: #f2f2ee;
+  --code-ink: #1a1a1a;
+  --code-block-ink: #1a1a1a;
+  --quote: #1a1a1a;
+  --quote-border: #1a1a1a;
+  --highlight: #fff3a3;
+  --selection: rgba(59, 110, 196, 0.16);
+  --danger: #c42b1c;
+  --on-danger: #ffffff;
+  --h1: #1a1a1a;
+  --h2: #1a1a1a;
+  --h3: #3b6ec4;
+  --h4: #757571;
+  --h1-size: 1.5em;
+  --h2-size: 1.28em;
+  --h3-size: 1.12em;
+  --h4-size: 1.02em;
+  --table-border: #e9e9e5;
+  --table-head: #f4f4f0;
+  --table-head-ink: #1a1a1a;
+  --table-stripe: rgba(0, 0, 0, 0.03);
+  --math: #3b6ec4;
+  --math-bg: #f2f2ee;
+  --rule: #1a1a1a;
+  --marker: #3b6ec4;
+  --strong: #1a1a1a;
+  --em: #1a1a1a;
+  --syn-keyword: #3b6ec4;
+  --syn-string: #1a1a1a;
+  --syn-number: #9a3412;
+  --syn-comment: #8e8e8a;
+  --editor-font: "Cascadia Mono", Consolas, "Sarasa Mono SC", monospace;
+  --editor-size: 15px;
+}

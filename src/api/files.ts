@@ -9,10 +9,20 @@ export interface DirEntryInfo {
   is_dir: boolean;
 }
 
+export type FileEncoding = "utf-8" | "utf-8-bom" | "utf-16le" | "utf-16be" | "gbk";
+
+export function normalizeEncoding(value: string | undefined): FileEncoding {
+  if (value === "utf-8-bom" || value === "utf-16le" || value === "utf-16be" || value === "gbk") {
+    return value;
+  }
+  return "utf-8";
+}
+
 export interface OpenedDocument {
   path: string;
   content: string;
   mtimeMs: number;
+  encoding?: string;
 }
 
 export async function openMarkdownPath(): Promise<string | null> {
@@ -45,8 +55,8 @@ export async function readDocument(path: string): Promise<OpenedDocument> {
   return invoke<OpenedDocument>("read_document", { path });
 }
 
-export function writeDocument(path: string, content: string): Promise<void> {
-  return invoke("write_document", { path, content });
+export function writeDocument(path: string, content: string, encoding = "utf-8"): Promise<void> {
+  return invoke("write_document", { path, content, encoding });
 }
 
 export function listDirectory(path: string): Promise<DirEntryInfo[]> {

@@ -1,0 +1,53 @@
+/* Material Dark (Material Dark)
+   scheme: dark
+   set: marktext
+   变量说明见同目录 README.md。 */
+html[data-theme="material-dark"] {
+  color-scheme: dark;
+  --paper: #34393f;
+  --ink: #abb2bf;
+  --muted: #8b939e;
+  --faint: #6d7580;
+  --line: #4f585e;
+  --bar: #272d34;
+  --chrome: #272d34;
+  --accent: #f48237;
+  --link: #61afef;
+  --menu: #3c4650;
+  --hover: rgba(255, 255, 255, 0.08);
+  --side: #272d34;
+  --code-bg: rgba(216, 216, 216, 0.16);
+  --code-block: #3f454c;
+  --code-ink: #e5c07b;
+  --code-block-ink: #f8f8f2;
+  --quote: #8b939e;
+  --quote-border: #f48237;
+  --highlight: rgba(244, 130, 55, 0.35);
+  --selection: rgba(244, 130, 55, 0.28);
+  --danger: #ff6969;
+  --on-danger: #ffffff;
+  --h1: #f48237;
+  --h2: #abb2bf;
+  --h3: #61afef;
+  --h4: #8b939e;
+  --h1-size: 1.65em;
+  --h2-size: 1.36em;
+  --h3-size: 1.16em;
+  --h4-size: 1.04em;
+  --table-border: #4f585e;
+  --table-head: #3f454c;
+  --table-head-ink: #f48237;
+  --table-stripe: rgba(244, 130, 55, 0.08);
+  --math: #e5c07b;
+  --math-bg: #3f454c;
+  --rule: #f48237;
+  --marker: #f48237;
+  --strong: #e5c07b;
+  --em: #abb2bf;
+  --syn-keyword: #c678dd;
+  --syn-string: #98c379;
+  --syn-number: #d19a66;
+  --syn-comment: #5c6370;
+  --editor-font: "Segoe UI", "Microsoft YaHei UI", "Microsoft YaHei", sans-serif;
+  --editor-size: 17px;
+}

@@ -25,6 +25,9 @@ export const FENCE_LANGS = [
   "xml",
   "markdown",
   "mermaid",
+  "vega",
+  "vega-lite",
+  "plantuml",
 ];
 
 const LABELS: Record<string, string> = {
@@ -51,6 +54,9 @@ const LABELS: Record<string, string> = {
   xml: "XML",
   markdown: "Markdown",
   mermaid: "Mermaid",
+  vega: "Vega",
+  "vega-lite": "Vega-Lite",
+  plantuml: "PlantUML",
 };
 
 let openMenu: HTMLElement | null = null;

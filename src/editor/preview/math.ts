@@ -3,6 +3,13 @@ import { Decoration, EditorView, WidgetType } from "@codemirror/view";
 const MAX_TEX = 4_000;
 const MAX_BLOCK_LINES = 80;
 
+let pandocMath = true;
+
+/** `\(...\)` and `\[...\]` stay off until the Markdown preference turns them on. */
+export function setPandocMath(enabled: boolean) {
+  pandocMath = enabled;
+}
+
 interface MathBuild {
   decos: Range<Decoration>[];
   atomic: Range<Decoration>[];
@@ -123,6 +130,19 @@ function maskCode(line: string): boolean[] {
   return mask;
 }
 
+function decoratePandocInline(view: EditorView, lineFrom: number, text: string, build: MathBuild) {
+  const mask = maskCode(text);
+  for (const match of text.matchAll(/\\\((.+?)\\\)|\\\[(.+?)\\\]/g)) {
+    if (match.index == null || mask[match.index]) continue;
+    const tex = (match[1] || match[2] || "").trim();
+    if (!tex || tex.length > MAX_TEX) continue;
+    const from = lineFrom + match.index;
+    const to = from + match[0].length;
+    if (covered(build, from, to) || rangeHasCursor(view, from, to)) continue;
+    hideMath(build, from, to, tex, match[0].startsWith("\\["));
+  }
+}
+
 function decorateInline(view: EditorView, lineFrom: number, text: string, build: MathBuild) {
   const mask = maskCode(text);
   let i = 0;
@@ -217,6 +237,14 @@ export function decorateMath(
     }
     if (line.to >= viewportFrom && line.from <= viewportTo && line.text.includes("$")) {
       decorateInline(view, line.from, line.text, build);
+    }
+    if (
+      pandocMath &&
+      line.to >= viewportFrom &&
+      line.from <= viewportTo &&
+      line.text.includes("\\")
+    ) {
+      decoratePandocInline(view, line.from, line.text, build);
     }
     n += 1;
   }
