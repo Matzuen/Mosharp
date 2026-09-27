@@ -1,3 +1,5 @@
+import { redo, undo } from "@codemirror/commands";
+import { openSearchPanel } from "@codemirror/search";
 import type { EditorState } from "@codemirror/state";
 import { isTauri } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
@@ -13,6 +15,7 @@ import {
   Show,
 } from "solid-js";
 import { ackClosePrompt, resolveClose, setUnsaved } from "./api/close";
+import { placeImage } from "./api/images";
 import {
   listDirectory,
   openFolderPath,
@@ -27,10 +30,30 @@ import {
   writeDocument,
   type DirEntryInfo,
 } from "./api/files";
+import logoUrl from "./assets/logo-mark.png";
 import { generateBenchmark } from "./editor/benchmark";
 import { createEditor, INITIAL_DOCUMENT, type EditorController } from "./editor/createEditor";
+import { pendingImagesIn } from "./editor/preview/docPath";
+import {
+  insertBullet,
+  insertFence,
+  insertHeading,
+  insertHr,
+  insertLink,
+  insertMathBlock,
+  insertMermaid,
+  insertQuote,
+  insertTable,
+  toggleBold,
+  toggleCode,
+  toggleHighlight,
+  toggleItalic,
+  toggleStrike,
+  toggleTask,
+} from "./editor/preview/formatCommands";
 import { activeOutlineIndex, parseOutlineDoc, type OutlineItem } from "./editor/outline";
 import { t, tLines } from "./shell/i18n";
+import { MenuBar, type MenuDef } from "./shell/MenuBar";
 import {
   clampPanelWidth,
   CONTENT_WIDTHS,
@@ -38,8 +61,6 @@ import {
   MAX_PANEL,
   MIN_PANEL,
   savePreferences,
-  type ContentWidth,
-  type Locale,
   type Preferences,
 } from "./shell/preferences";
 import {
@@ -135,7 +156,6 @@ export default function App() {
   const [tree, setTree] = createSignal<TreeNode[]>([]);
   const [menu, setMenu] = createSignal<MenuState | null>(null);
   const [recent, setRecent] = createSignal<RecentEntry[]>(loadRecent());
-  const [recentOpen, setRecentOpen] = createSignal(false);
 
   const locale = createMemo(() => prefs().locale);
   const activeTab = createMemo(() => tabs().find((tab) => tab.id === activeTabId()) ?? null);
@@ -299,6 +319,7 @@ export default function App() {
     activeId = id;
     setActiveTabId(id);
     editor.setState(target.state);
+    editor.setDocumentPath(target.path);
     editor.setScrollTop(target.scrollTop);
     setDirty(target.dirty);
     if (target.dirty) showDirtyBadge();
@@ -320,6 +341,7 @@ export default function App() {
     activeId = id;
     setActiveTabId(id);
     editor.setState(state);
+    editor.setDocumentPath(path);
     editor.setScrollTop(0);
     setDirty(dirtyValue);
     setDirtyBadge(false);
@@ -364,6 +386,7 @@ export default function App() {
       activeId = fresh.id;
       setActiveTabId(fresh.id);
       editor.setState(fresh.state!);
+      editor.setDocumentPath(null);
       editor.setScrollTop(0);
       setDirty(false);
       setDirtyBadge(false);
@@ -414,6 +437,7 @@ export default function App() {
         setActiveTabId(id);
         const ms = performance.now();
         editor.setState(state);
+        editor.setDocumentPath(path);
         editor.setScrollTop(0);
         setDirty(false);
         setDirtyBadge(false);
@@ -577,7 +601,12 @@ export default function App() {
   async function persist(target: string) {
     if (!editor) return;
     try {
-      if (isTauri()) await suppressFileWatch(target);
+      if (isTauri()) {
+        await suppressFileWatch(target);
+        for (const image of pendingImagesIn(editor.text())) {
+          await placeImage(target, image.relative, image.absolute);
+        }
+      }
       await writeDocument(target, editor.text());
       if (isTauri()) await touchFileWatchBaseline(target);
       setTabs((current) =>
@@ -589,6 +618,7 @@ export default function App() {
       void syncTitle();
       scheduleSessionSave();
       refreshWatches();
+      editor.setDocumentPath(target);
       setNotice(t(locale(), "savedOk"));
       if (prefs().workspaceRoot) void reloadTree();
     } catch (error) {
@@ -690,7 +720,228 @@ export default function App() {
 
   function closeMenu() {
     setMenu(null);
-    setRecentOpen(false);
+  }
+
+  function edit(action: Parameters<NonNullable<typeof editor>["run"]>[0]) {
+    if (!editor) return;
+    editor.run(action);
+    editor.focus();
+  }
+
+  function menus(): MenuDef[] {
+    const lang = locale();
+    const label = (key: Parameters<typeof t>[1]) => t(lang, key);
+    const recentItems = recent();
+    return [
+      {
+        id: "file",
+        label: label("menuFile"),
+        access: "F",
+        items: [
+          { id: "new", label: label("new"), shortcut: "Ctrl+T", run: () => newDoc() },
+          { id: "open", label: label("open"), shortcut: "Ctrl+O", run: () => void openDoc() },
+          {
+            id: "open-folder",
+            label: label("openFolder"),
+            shortcut: "Ctrl+Shift+O",
+            run: () => void openFolder(),
+          },
+          {
+            id: "recent",
+            label: label("recent"),
+            children:
+              recentItems.length > 0
+                ? recentItems.map((item) => ({
+                    id: item.path,
+                    label: documentName(item.path, label("untitled")),
+                    run: () => void openPathInTab(item.path),
+                  }))
+                : [{ id: "no-recent", label: label("noRecent"), disabled: true }],
+          },
+          { id: "sep-file-1", sep: true },
+          { id: "save", label: label("save"), shortcut: "Ctrl+S", run: () => void save() },
+          { id: "save-as", label: label("saveAs"), shortcut: "Ctrl+Shift+S", run: () => void saveAs() },
+          { id: "sep-file-2", sep: true },
+          {
+            id: "close-tab",
+            label: label("close"),
+            run: () => {
+              if (activeId) void closeTab(activeId);
+            },
+          },
+        ],
+      },
+      {
+        id: "edit",
+        label: label("menuEdit"),
+        access: "E",
+        items: [
+          { id: "undo", label: label("undo"), shortcut: "Ctrl+Z", run: () => edit((view) => undo(view)) },
+          { id: "redo", label: label("redo"), shortcut: "Ctrl+Y", run: () => edit((view) => redo(view)) },
+          { id: "sep-edit", sep: true },
+          {
+            id: "find",
+            label: label("find"),
+            shortcut: "Ctrl+F",
+            run: () => edit((view) => openSearchPanel(view)),
+          },
+          { id: "sep-edit-2", sep: true },
+          {
+            id: "copy-path",
+            label: label("copyPath"),
+            run: () => void copyPath(activeTab()?.path),
+          },
+          {
+            id: "reveal",
+            label: label("reveal"),
+            run: () => void reveal(activeTab()?.path),
+          },
+        ],
+      },
+      {
+        id: "paragraph",
+        label: label("menuParagraph"),
+        access: "P",
+        items: [
+          { id: "h1", label: label("heading1"), run: () => edit((view) => insertHeading(view, 1)) },
+          { id: "h2", label: label("heading2"), run: () => edit((view) => insertHeading(view, 2)) },
+          { id: "h3", label: label("heading3"), run: () => edit((view) => insertHeading(view, 3)) },
+          { id: "sep-p", sep: true },
+          { id: "bullet", label: label("bullet"), run: () => edit((view) => insertBullet(view)) },
+          {
+            id: "task",
+            label: label("task"),
+            shortcut: "Ctrl+Enter",
+            run: () => edit((view) => toggleTask(view)),
+          },
+          { id: "quote", label: label("quote"), run: () => edit((view) => insertQuote(view)) },
+          { id: "sep-p2", sep: true },
+          { id: "fence", label: label("fence"), run: () => edit((view) => insertFence(view)) },
+          { id: "math", label: label("math"), run: () => edit((view) => insertMathBlock(view)) },
+          { id: "table", label: label("table"), run: () => edit((view) => insertTable(view)) },
+          { id: "hr", label: label("hr"), run: () => edit((view) => insertHr(view)) },
+          { id: "mermaid", label: "Mermaid", run: () => edit((view) => insertMermaid(view)) },
+        ],
+      },
+      {
+        id: "format",
+        label: label("menuFormat"),
+        access: "O",
+        items: [
+          { id: "bold", label: label("bold"), shortcut: "Ctrl+B", run: () => edit((view) => toggleBold(view)) },
+          { id: "italic", label: label("italic"), shortcut: "Ctrl+I", run: () => edit((view) => toggleItalic(view)) },
+          {
+            id: "code",
+            label: label("inlineCode"),
+            shortcut: "Ctrl+E",
+            run: () => edit((view) => toggleCode(view)),
+          },
+          {
+            id: "highlight",
+            label: label("highlight"),
+            shortcut: "Ctrl+Shift+H",
+            run: () => edit((view) => toggleHighlight(view)),
+          },
+          {
+            id: "strike",
+            label: label("strike"),
+            shortcut: "Ctrl+Shift+U",
+            run: () => edit((view) => toggleStrike(view)),
+          },
+          { id: "link", label: label("link"), shortcut: "Ctrl+K", run: () => edit((view) => insertLink(view)) },
+        ],
+      },
+      {
+        id: "view",
+        label: label("menuView"),
+        access: "V",
+        items: [
+          {
+            id: "panel",
+            label: label("panel"),
+            shortcut: "Ctrl+\\",
+            checked: prefs().panelOpen,
+            run: () => patchPrefs({ panelOpen: !prefs().panelOpen }),
+          },
+          {
+            id: "files",
+            label: label("files"),
+            checked: prefs().panelMode === "files",
+            run: () => patchPrefs({ panelOpen: true, panelMode: "files" }),
+          },
+          {
+            id: "outline",
+            label: label("outline"),
+            checked: prefs().panelMode === "outline",
+            run: () => patchPrefs({ panelOpen: true, panelMode: "outline" }),
+          },
+          { id: "sep-view", sep: true },
+          {
+            id: "source",
+            label: label("sourceMode"),
+            shortcut: "Ctrl+/",
+            checked: prefs().sourceMode,
+            run: () => toggleMode("sourceMode"),
+          },
+          {
+            id: "typewriter",
+            label: label("typewriter"),
+            checked: prefs().typewriter,
+            run: () => toggleMode("typewriter"),
+          },
+          {
+            id: "focus",
+            label: label("focusMode"),
+            checked: prefs().focusMode,
+            run: () => toggleMode("focusMode"),
+          },
+          { id: "sep-view-2", sep: true },
+          ...CONTENT_WIDTHS.map((width) => ({
+            id: `width-${width}`,
+            label: `${label("width")} ${width}`,
+            checked: prefs().contentWidth === width,
+            run: () => patchPrefs({ contentWidth: width }),
+          })),
+          { id: "sep-view-3", sep: true },
+          {
+            id: "lang-zh",
+            label: "中文",
+            checked: lang === "zh-CN",
+            run: () => {
+              patchPrefs({ locale: "zh-CN" });
+              editor?.setPhrases("zh-CN");
+              setNotice(t("zh-CN", "ready"));
+              void syncTitle();
+            },
+          },
+          {
+            id: "lang-en",
+            label: "English",
+            checked: lang === "en",
+            run: () => {
+              patchPrefs({ locale: "en" });
+              editor?.setPhrases("en");
+              setNotice(t("en", "ready"));
+              void syncTitle();
+            },
+          },
+        ],
+      },
+      {
+        id: "theme",
+        label: label("menuTheme"),
+        access: "T",
+        items: [{ id: "paper", label: label("paperTheme"), checked: true }],
+      },
+      {
+        id: "help",
+        label: label("menuHelp"),
+        access: "H",
+        items: [
+          { id: "benchmark", label: label("benchmark"), run: () => void loadBenchmark() },
+        ],
+      },
+    ];
   }
 
   async function restoreSession(): Promise<boolean> {
@@ -749,6 +1000,7 @@ export default function App() {
       activeId = active.id;
       setActiveTabId(active.id);
       editor.setState(active.state!);
+      editor.setDocumentPath(active.path);
       editor.setScrollTop(active.scrollTop);
       setDirty(active.dirty);
       setDirtyBadge(false);
@@ -821,7 +1073,30 @@ export default function App() {
     }
   }
 
+  async function minimizeWindow() {
+    if (!isTauri()) return;
+    await getCurrentWindow().minimize();
+  }
+
+  async function toggleWindow() {
+    if (!isTauri()) return;
+    await getCurrentWindow().toggleMaximize();
+  }
+
+  async function closeWindow() {
+    if (!isTauri()) return;
+    await getCurrentWindow().close();
+  }
+
   onMount(() => {
+    if (isTauri()) {
+      const appWindow = getCurrentWindow();
+      void appWindow.setDecorations(false).catch(() => {});
+      void fetch(logoUrl)
+        .then((response) => response.arrayBuffer())
+        .then((buffer) => appWindow.setIcon(new Uint8Array(buffer)))
+        .catch(() => {});
+    }
     persistPrefs(initialPrefs);
     setNotice(t(initialPrefs.locale, "ready"));
 
@@ -999,113 +1274,9 @@ export default function App() {
   return (
     <div class="app">
       <header class="chrome">
-        <div class="chrome-actions">
-          <Show when={dirtyBadge()}>
-            <span class="dirty-fade">{t(locale(), "unsaved")}</span>
-          </Show>
-          <button type="button" title="Ctrl+\\" onClick={() => patchPrefs({ panelOpen: !prefs().panelOpen })}>
-            {t(locale(), "panel")}
-          </button>
-          <button type="button" title="Ctrl+O" onClick={() => void openDoc()}>
-            {t(locale(), "open")}
-          </button>
-          <button type="button" title="Ctrl+Shift+O" onClick={() => void openFolder()}>
-            {t(locale(), "openFolder")}
-          </button>
-          <div class="recent-wrap">
-            <button
-              type="button"
-              onClick={(event) => {
-                event.stopPropagation();
-                setRecentOpen((open) => !open);
-              }}
-            >
-              {t(locale(), "recent")}
-            </button>
-            <Show when={recentOpen()}>
-              <div class="recent-menu" onClick={(event) => event.stopPropagation()}>
-                <Show
-                  when={recent().length > 0}
-                  fallback={<div class="recent-empty">{t(locale(), "noRecent")}</div>}
-                >
-                  <For each={recent()}>
-                    {(item) => (
-                      <button
-                        type="button"
-                        title={item.path}
-                        onClick={() => {
-                          setRecentOpen(false);
-                          void openPathInTab(item.path);
-                        }}
-                      >
-                        {documentName(item.path, t(locale(), "untitled"))}
-                      </button>
-                    )}
-                  </For>
-                </Show>
-              </div>
-            </Show>
-          </div>
-          <button type="button" title="Ctrl+S" onClick={() => void save()}>
-            {t(locale(), "save")}
-          </button>
-          <button type="button" title="Ctrl+Shift+S" onClick={() => void saveAs()}>
-            {t(locale(), "saveAs")}
-          </button>
-          <button
-            type="button"
-            class={prefs().sourceMode ? "mode-on" : ""}
-            title="Ctrl+/ 源码模式，再按一次回到预览"
-            onClick={() => toggleMode("sourceMode")}
-          >
-            {t(locale(), "sourceMode")}
-          </button>
-          <button
-            type="button"
-            class={prefs().typewriter ? "mode-on" : ""}
-            title="打字机：光标行保持在视口中部"
-            onClick={() => toggleMode("typewriter")}
-          >
-            {t(locale(), "typewriter")}
-          </button>
-          <button
-            type="button"
-            class={prefs().focusMode ? "mode-on" : ""}
-            title="专注：淡化当前块以外的内容"
-            onClick={() => toggleMode("focusMode")}
-          >
-            {t(locale(), "focusMode")}
-          </button>
-          <label class="width-select">
-            {t(locale(), "width")}
-            <select
-              value={String(prefs().contentWidth)}
-              onChange={(event) =>
-                patchPrefs({ contentWidth: Number(event.currentTarget.value) as ContentWidth })
-              }
-            >
-              <For each={CONTENT_WIDTHS}>{(width) => <option value={width}>{width}</option>}</For>
-            </select>
-          </label>
-          <label class="width-select">
-            {t(locale(), "language")}
-            <select
-              value={locale()}
-              onChange={(event) => {
-                const next = event.currentTarget.value as Locale;
-                patchPrefs({ locale: next });
-                editor?.setPhrases(next);
-                setNotice(t(next, "ready"));
-                void syncTitle();
-              }}
-            >
-              <option value="zh-CN">中文</option>
-              <option value="en">English</option>
-            </select>
-          </label>
-          <button type="button" onClick={() => void loadBenchmark()}>
-            {t(locale(), "benchmark")}
-          </button>
+        <div class="titlebar">
+        <div class="chrome-brand" data-tauri-drag-region>
+          <img class="app-logo" src={logoUrl} alt="" draggable={false} />
         </div>
         <div class="tabs" role="tablist">
           <For each={tabs()}>
@@ -1155,6 +1326,25 @@ export default function App() {
           >
             +
           </button>
+        </div>
+        <div class="chrome-drag" data-tauri-drag-region />
+        <div class="window-controls">
+          <button type="button" class="win-btn" title="最小化" onClick={() => void minimizeWindow()}>
+            <span class="win-min" aria-hidden="true" />
+          </button>
+          <button type="button" class="win-btn" title="最大化" onClick={() => void toggleWindow()}>
+            <span class="win-max" aria-hidden="true" />
+          </button>
+          <button type="button" class="win-btn win-close" title="关闭" onClick={() => void closeWindow()}>
+            <span class="win-x" aria-hidden="true" />
+          </button>
+        </div>
+        </div>
+        <div class="menu-row">
+          <MenuBar menus={menus} />
+          <Show when={dirtyBadge()}>
+            <span class="dirty-fade">{t(locale(), "unsaved")}</span>
+          </Show>
         </div>
       </header>
 

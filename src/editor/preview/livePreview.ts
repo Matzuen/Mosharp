@@ -11,6 +11,10 @@ import {
   type DecorationSet,
   type ViewUpdate,
 } from "@codemirror/view";
+import { FenceLangWidget } from "./codeLang";
+import { imageSuffix, imageUrl, ImageWidget } from "./images";
+import { decorateMath } from "./math";
+import { MermaidWidget } from "./mermaidBlock";
 import { focusModeField, sourceModeField } from "./modes";
 
 /** Docs at/above this line count: decorate only after scroll settles. */
@@ -124,23 +128,6 @@ class CollapseWidget extends WidgetType {
 
 const collapseWidget = new CollapseWidget();
 
-class FenceWidget extends WidgetType {
-  constructor(readonly label: string) {
-    super();
-  }
-
-  eq(other: FenceWidget) {
-    return this.label === other.label;
-  }
-
-  toDOM() {
-    const el = document.createElement("span");
-    el.className = "cm-md-fence";
-    el.textContent = this.label;
-    return el;
-  }
-}
-
 class TableWidget extends WidgetType {
   dom: HTMLElement | null = null;
 
@@ -162,6 +149,8 @@ class TableWidget extends WidgetType {
   }
 
   toDOM(view: EditorView) {
+    const wrap = document.createElement("div");
+    wrap.className = "cm-md-table-wrap";
     const table = document.createElement("table");
     table.className = "cm-md-table-widget";
     const lines = this.source.split("\n").filter((line) => line.trim().length > 0);
@@ -186,8 +175,31 @@ class TableWidget extends WidgetType {
       visualRow += 1;
     }
     table.appendChild(tbody);
-    this.dom = table;
-    return table;
+    const chrome = document.createElement("div");
+    chrome.className = "cm-md-table-chrome";
+    const actions: Array<[string, TableOp]> = [
+      ["加一行", "add-row"],
+      ["删一行", "del-row"],
+      ["加一列", "add-col"],
+      ["删一列", "del-col"],
+    ];
+    for (const [label, op] of actions) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "cm-md-table-op";
+      button.textContent = label;
+      button.addEventListener("mousedown", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        const pos = view.posAtDOM(wrap);
+        if (pos == null) return;
+        queueMicrotask(() => mutateTable(view, pos, op));
+      });
+      chrome.appendChild(button);
+    }
+    wrap.append(table, chrome);
+    this.dom = wrap;
+    return wrap;
   }
 
   ignoreEvent() {
@@ -249,6 +261,58 @@ function renderRow(
   return row;
 }
 
+type TableOp = "add-row" | "del-row" | "add-col" | "del-col";
+
+function tableLinesAt(view: EditorView, pos: number) {
+  const lines: Array<{ from: number; to: number; text: string }> = [];
+  let lineNo = view.state.doc.lineAt(pos).number;
+  while (lineNo <= view.state.doc.lines && lines.length < 200) {
+    const line = view.state.doc.line(lineNo);
+    if (lines.length > 0 && !line.text.includes("|")) break;
+    if (!line.text.includes("|")) break;
+    lines.push({ from: line.from, to: line.to, text: line.text });
+    lineNo += 1;
+  }
+  return lines;
+}
+
+function joinCells(cells: string[]) {
+  return `| ${cells.join(" | ")} |`;
+}
+
+function mutateTable(view: EditorView, pos: number, op: TableOp) {
+  const lines = tableLinesAt(view, pos);
+  if (lines.length === 0) return;
+  const rows = lines.map((line) => line.text);
+  const hasDelimiter = rows[1] != null && isDelimiterRow(rows[1]);
+  const cols = Math.max(1, splitCells(rows[0]).length);
+  let next: string[] | null = null;
+  if (op === "add-row") {
+    next = [...rows, joinCells(Array.from({ length: cols }, () => " "))];
+  } else if (op === "del-row") {
+    const bodyStart = hasDelimiter ? 2 : 1;
+    if (rows.length > bodyStart) next = rows.slice(0, -1);
+  } else if (op === "add-col") {
+    next = rows.map((row) => {
+      const cells = splitCells(row);
+      cells.push(isDelimiterRow(row) ? "---" : " ");
+      return joinCells(cells);
+    });
+  } else if (cols > 1) {
+    next = rows.map((row) => {
+      const cells = splitCells(row);
+      cells.pop();
+      return joinCells(cells);
+    });
+  }
+  if (!next) return;
+  const insert = next.join("\n");
+  const from = lines[0].from;
+  const to = lines[lines.length - 1].to;
+  if (insert === view.state.doc.sliceString(from, to)) return;
+  view.dispatch({ changes: { from, to, insert } });
+}
+
 function commitCell(view: EditorView, pos: number, visualRow: number, col: number, text: string) {
   if (pos < 0 || pos > view.state.doc.length) return;
   const lines: Array<{ from: number; to: number; text: string }> = [];
@@ -294,6 +358,9 @@ class HiddenLineNumber extends GutterMarker {
 
 const hiddenLineNumber = new HiddenLineNumber();
 const setHiddenLineNumbers = StateEffect.define<RangeSet<GutterMarker>>();
+
+/** Ask the preview to rebuild, for example after the file path changes. */
+export const refreshPreview = StateEffect.define<null>();
 
 /** Replaces the digits on collapsed table/setext lines so they cannot stack. */
 export const hiddenLineNumberField = StateField.define<RangeSet<GutterMarker>>({
@@ -397,19 +464,39 @@ function decorateRange(
       if (name === "FencedCode" || name === "IndentedCode") {
         const start = view.state.doc.lineAt(node.from);
         const end = view.state.doc.lineAt(Math.max(node.from, node.to - 1));
+        const info = start.text.replace(/^ {0,3}`{3,}/, "").trim().split(/\s+/)[0] ?? "";
+        const cursorIn = rangeHasCursor(view, node.from, node.to);
+        if (name === "FencedCode" && info.toLowerCase() === "mermaid" && !cursorIn) {
+          const bodyFrom = start.number < end.number ? view.state.doc.line(start.number + 1).from : start.to;
+          const bodyTo = end.number > start.number ? view.state.doc.line(end.number).from : end.to;
+          const source = view.state.doc.sliceString(bodyFrom, Math.max(bodyFrom, bodyTo)).replace(/\n$/, "");
+          const deco = Decoration.replace({ widget: new MermaidWidget(source) }).range(start.from, start.to);
+          build.decos.push(deco);
+          build.atomic.push(deco);
+          for (let n = start.number + 1; n <= end.number; n += 1) {
+            const line = view.state.doc.line(n);
+            const sink = Decoration.replace({ widget: collapseWidget }).range(line.from, line.to);
+            build.decos.push(sink);
+            build.atomic.push(sink);
+            addLineClass(build, n, "cm-md-sink");
+            build.hidden.push(line.from);
+          }
+          build.covered.push({ from: start.from, to: end.to });
+          return false;
+        }
         for (let n = start.number; n <= end.number; n += 1) {
           const line = view.state.doc.line(n);
           if (line.from > to || line.to < from) continue;
           addLineClass(build, n, "cm-md-codeblock");
-          if (name === "FencedCode" && /^`{3,}/.test(line.text) && !lineHasCursor(view, n)) {
-            const lang = line.text.replace(/^`{3,}/, "").trim();
-            const widget = new FenceWidget(lang ? lang : n === start.number ? "" : "");
+          if (name === "FencedCode" && /^`{3,}/.test(line.text.trim()) && !lineHasCursor(view, n)) {
+            const widget = n === start.number ? new FenceLangWidget(info) : collapseWidget;
             const deco = Decoration.replace({ widget }).range(line.from, line.to);
             build.decos.push(deco);
             build.atomic.push(deco);
             build.covered.push({ from: line.from, to: line.to });
           }
         }
+        build.covered.push({ from: node.from, to: node.to });
       }
 
       if (name === "Table") {
@@ -521,6 +608,23 @@ function decorateRange(
         markSpan(build, node.from, node.to, "cm-md-link");
       }
 
+      if (name === "Image") {
+        const suffix = imageSuffix(view.state.doc, node.to);
+        if (!rangeHasCursor(view, node.from, suffix.end)) {
+          const raw = view.state.doc.sliceString(node.from, node.to);
+          const parsed = imageUrl(raw);
+          if (parsed.src) {
+            const deco = Decoration.replace({
+              widget: new ImageWidget(parsed.src, parsed.alt, suffix.width),
+            }).range(node.from, suffix.end);
+            build.decos.push(deco);
+            build.atomic.push(deco);
+            build.covered.push({ from: node.from, to: suffix.end });
+          }
+        }
+        return false;
+      }
+
       if (name === "TaskMarker") {
         const text = view.state.doc.sliceString(node.from, node.to);
         const checked = /\[x\]/i.test(text);
@@ -582,6 +686,7 @@ function buildDecorations(view: EditorView): {
 
   for (const range of view.visibleRanges) {
     decorateRange(view, range.from, range.to, focusMode, activeBlock, build);
+    decorateMath(view, range.from, range.to, build);
   }
 
   for (const [lineNo, classes] of build.lineClasses) {
@@ -673,7 +778,10 @@ export const livePreviewPlugin = ViewPlugin.fromClass(
         return;
       }
 
-      if (update.docChanged || update.selectionSet || modesChanged || treeChanged) {
+      const refreshed = update.transactions.some((tr) =>
+        tr.effects.some((effect) => effect.is(refreshPreview)),
+      );
+      if (update.docChanged || update.selectionSet || modesChanged || treeChanged || refreshed) {
         this.clearIdle();
         this.apply(update.view);
         return;
@@ -845,6 +953,98 @@ export const livePreviewTheme = EditorView.baseTheme({
   ".cm-md-fence": {
     color: "#a8a29e",
     fontFamily: 'Consolas, "Courier New", monospace',
+    fontSize: "12px",
+    border: "none",
+    background: "transparent",
+    padding: "0 4px",
+    cursor: "pointer",
+  },
+  ".cm-md-lang-menu": {
+    position: "absolute",
+    zIndex: "30",
+    maxHeight: "240px",
+    overflow: "auto",
+    background: "#fff",
+    border: "1px solid #e7e5e4",
+    borderRadius: "8px",
+    boxShadow: "0 8px 20px rgba(28,25,23,0.12)",
+    padding: "4px",
+    minWidth: "140px",
+  },
+  ".cm-md-lang-item": {
+    display: "block",
+    width: "100%",
+    textAlign: "left",
+    border: "none",
+    background: "transparent",
+    padding: "4px 10px",
+    cursor: "pointer",
+    color: "#1c1917",
+    fontSize: "13px",
+  },
+  ".cm-md-lang-item:hover": { background: "#eceae6" },
+  ".cm-md-math": { cursor: "text" },
+  ".cm-md-math-block": {
+    display: "block",
+    overflowX: "auto",
+    margin: "0.35em 0",
+  },
+  ".cm-md-image": {
+    display: "inline-block",
+    position: "relative",
+    maxWidth: "100%",
+    margin: "0.35em 0",
+    verticalAlign: "top",
+  },
+  ".cm-md-image img": {
+    display: "block",
+    maxWidth: "100%",
+    height: "auto",
+  },
+  ".cm-md-image-missing": {
+    color: "#a8a29e",
+    fontSize: "13px",
+  },
+  ".cm-md-image-handle": {
+    position: "absolute",
+    right: "0",
+    bottom: "0",
+    width: "14px",
+    height: "14px",
+    borderRadius: "3px",
+    background: "var(--accent, #9a3412)",
+    cursor: "ew-resize",
+  },
+  ".cm-md-mermaid": {
+    display: "block",
+    margin: "0.5em 0",
+    padding: "8px",
+    overflowX: "auto",
+    background: "var(--paper, #f7f5f0)",
+    cursor: "pointer",
+  },
+  ".cm-md-mermaid svg": { maxWidth: "100%", height: "auto" },
+  ".cm-md-table-wrap": {
+    display: "inline-block",
+    width: "100%",
+    verticalAlign: "top",
+  },
+  ".cm-md-table-chrome": {
+    display: "none",
+    gap: "4px",
+    marginTop: "4px",
+  },
+  ".cm-md-table-wrap:hover .cm-md-table-chrome, .cm-md-table-wrap:focus-within .cm-md-table-chrome": {
+    display: "flex",
+  },
+  ".cm-md-table-op": {
+    height: "26px",
+    padding: "0 8px",
+    border: "1px solid #e7e5e4",
+    borderRadius: "6px",
+    background: "#fff",
+    color: "#1c1917",
+    cursor: "pointer",
     fontSize: "12px",
   },
   ".cm-task-checkbox": {

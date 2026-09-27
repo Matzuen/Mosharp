@@ -3,7 +3,7 @@ mod document;
 mod watch;
 mod workspace;
 
-use document::{read_document, write_document};
+use document::{place_image, read_document, save_image, write_document};
 use watch::{
     save_recovery_copy, suppress_file_watch, sync_file_watches, touch_file_watch_baseline,
     FileWatchState,
@@ -21,6 +21,8 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             read_document,
             write_document,
+            save_image,
+            place_image,
             list_directory,
             reveal_in_folder,
             sync_file_watches,

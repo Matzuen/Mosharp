@@ -103,6 +103,26 @@ export function insertHeading(view: EditorView, level: number) {
   return true;
 }
 
+export function insertMathBlock(view: EditorView) {
+  const line = view.state.doc.lineAt(view.state.selection.main.head);
+  const insert = "\n$$\n\n$$\n";
+  view.dispatch({
+    changes: { from: line.to, insert },
+    selection: EditorSelection.cursor(line.to + 4),
+  });
+  return true;
+}
+
+export function insertMermaid(view: EditorView) {
+  const line = view.state.doc.lineAt(view.state.selection.main.head);
+  const insert = "\n```mermaid\ngraph LR\n  A --> B\n```\n";
+  view.dispatch({
+    changes: { from: line.to, insert },
+    selection: EditorSelection.cursor(line.to + 12),
+  });
+  return true;
+}
+
 export function insertFence(view: EditorView) {
   const selection = view.state.selection.main;
   const body = selection.empty ? "" : view.state.sliceDoc(selection.from, selection.to);

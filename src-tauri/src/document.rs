@@ -145,6 +145,123 @@ fn rename_replace(from: &Path, to: &Path) -> std::io::Result<()> {
     fs::rename(from, to)
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SavedImage {
+    pub relative: String,
+    pub absolute: String,
+}
+
+fn image_extension(extension: &str) -> Result<&'static str, String> {
+    match extension.trim().to_ascii_lowercase().as_str() {
+        "png" => Ok("png"),
+        "jpg" | "jpeg" => Ok("jpg"),
+        "gif" => Ok("gif"),
+        "webp" => Ok("webp"),
+        "svg" => Ok("svg"),
+        _ => Err("不支持的图片格式".to_string()),
+    }
+}
+
+fn assets_dir_for(doc_path: Option<&str>) -> Result<PathBuf, String> {
+    if let Some(path) = doc_path.map(str::trim).filter(|path| !path.is_empty()) {
+        let doc = PathBuf::from(path);
+        let parent = match doc.parent() {
+            Some(parent) if !parent.as_os_str().is_empty() => parent.to_path_buf(),
+            _ => PathBuf::from("."),
+        };
+        return Ok(parent.join("assets"));
+    }
+    let home = std::env::var_os("USERPROFILE")
+        .or_else(|| std::env::var_os("HOME"))
+        .ok_or_else(|| "找不到用户目录".to_string())?;
+    Ok(PathBuf::from(home).join(".mosharp").join("assets"))
+}
+
+fn safe_asset_name(relative: &str) -> Result<String, String> {
+    let normalized = relative.replace('\\', "/");
+    let name = normalized
+        .strip_prefix("assets/")
+        .ok_or_else(|| "图片必须放在 assets 目录".to_string())?;
+    if name.is_empty()
+        || name.contains('/')
+        || name.contains("..")
+        || !name
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || ch == '-' || ch == '_' || ch == '.')
+    {
+        return Err("图片路径不安全".to_string());
+    }
+    Ok(name.to_string())
+}
+
+#[tauri::command]
+pub fn save_image(
+    doc_path: Option<String>,
+    bytes: Vec<u8>,
+    extension: String,
+) -> Result<SavedImage, String> {
+    if bytes.len() > 20 * 1024 * 1024 {
+        return Err("图片超过 20MB".to_string());
+    }
+    if bytes.is_empty() {
+        return Err("图片是空的".to_string());
+    }
+    let ext = image_extension(&extension)?;
+    let dir = assets_dir_for(doc_path.as_deref())?;
+    fs::create_dir_all(&dir).map_err(|err| map_io_error(err, "保存图片", &dir))?;
+    let name = format!(
+        "img-{}-{}.{}",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|value| value.as_millis())
+            .unwrap_or(0),
+        TEMP_NONCE.fetch_add(1, Ordering::Relaxed),
+        ext
+    );
+    let absolute = dir.join(&name);
+    fs::write(&absolute, bytes).map_err(|err| map_io_error(err, "保存图片", &absolute))?;
+    Ok(SavedImage {
+        relative: format!("assets/{name}"),
+        absolute: absolute.to_string_lossy().into_owned(),
+    })
+}
+
+#[tauri::command]
+pub fn place_image(doc_path: String, relative: String, source: String) -> Result<(), String> {
+    let name = safe_asset_name(&relative)?;
+    let source_path = PathBuf::from(&source);
+    if !source_path.is_file() {
+        return Err("找不到要放进文档旁的图片".to_string());
+    }
+    let source_canon = source_path
+        .canonicalize()
+        .map_err(|err| map_io_error(err, "读取图片", &source_path))?;
+    let dir = assets_dir_for(Some(doc_path.as_str()))?;
+    fs::create_dir_all(&dir).map_err(|err| map_io_error(err, "保存图片", &dir))?;
+    let dest = dir.join(name);
+    if dest.exists() {
+        let dest_canon = dest
+            .canonicalize()
+            .map_err(|err| map_io_error(err, "保存图片", &dest))?;
+        if dest_canon == source_canon {
+            return Ok(());
+        }
+    }
+    let home = std::env::var_os("USERPROFILE")
+        .or_else(|| std::env::var_os("HOME"))
+        .ok_or_else(|| "找不到用户目录".to_string())?;
+    let allowed = PathBuf::from(home).join(".mosharp").join("assets");
+    let allowed_canon = allowed
+        .canonicalize()
+        .map_err(|_| "图片不在可移动的目录里".to_string())?;
+    if !source_canon.starts_with(&allowed_canon) {
+        return Err("只能移动编辑器自己保存的图片".to_string());
+    }
+    fs::copy(&source_canon, &dest).map_err(|err| map_io_error(err, "保存图片", &dest))?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::{read_document, write_document};

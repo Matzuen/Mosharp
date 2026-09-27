@@ -5,16 +5,13 @@ import {
   indentWithTab,
   undo,
 } from "@codemirror/commands";
-import { css } from "@codemirror/lang-css";
-import { html } from "@codemirror/lang-html";
-import { javascript } from "@codemirror/lang-javascript";
 import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
+import { languages } from "@codemirror/language-data";
 import {
   bracketMatching,
   defaultHighlightStyle,
   indentOnInput,
   indentUnit,
-  LanguageDescription,
   syntaxHighlighting,
 } from "@codemirror/language";
 import { highlightSelectionMatches, search, searchKeymap } from "@codemirror/search";
@@ -32,7 +29,14 @@ import { searchPhrases, type EditorLocale } from "./phrases";
 import { flashEffect, flashField } from "./preview/flash";
 import { HighlightExtension } from "./preview/highlightExt";
 import { linkClickHandler, linkModCursor } from "./preview/links";
-import { hiddenLineNumberField, livePreviewPlugin, livePreviewTheme } from "./preview/livePreview";
+import { setActiveDocumentPath } from "./preview/docPath";
+import { pasteImageHandler } from "./preview/images";
+import {
+  hiddenLineNumberField,
+  livePreviewPlugin,
+  livePreviewTheme,
+  refreshPreview,
+} from "./preview/livePreview";
 import {
   focusModeField,
   setFocusMode,
@@ -72,7 +76,18 @@ export const INITIAL_DOCUMENT = `# 未命名
 
 ## 中文标题
 
-标题锚点可以跳到这里。
+标题锚点可以跳到这里。行内公式 $E=mc^2$。
+
+$$
+a^2+b^2=c^2
+$$
+
+![色块](data:image/svg+xml,%3Csvg%20xmlns=%22http://www.w3.org/2000/svg%22%20width=%2280%22%20height=%2224%22%3E%3Crect%20width=%2280%22%20height=%2224%22%20fill=%22%239a3412%22/%3E%3C/svg%3E)
+
+\`\`\`mermaid
+graph LR
+  写作 --> 预览
+\`\`\`
 
 \`\`\`js
 const hello = "world"
@@ -106,25 +121,9 @@ export interface EditorController {
   getModes: () => PreviewModes;
   setModes: (partial: Partial<PreviewModes>) => void;
   setPhrases: (locale: EditorLocale) => void;
+  setDocumentPath: (path: string | null) => void;
+  run: (action: (view: EditorView) => void) => void;
 }
-
-const fenceLanguages = [
-  LanguageDescription.of({
-    name: "JavaScript",
-    alias: ["js", "javascript", "ts", "typescript", "jsx", "tsx"],
-    support: javascript({ typescript: true }),
-  }),
-  LanguageDescription.of({
-    name: "HTML",
-    alias: ["html", "htm"],
-    support: html(),
-  }),
-  LanguageDescription.of({
-    name: "CSS",
-    alias: ["css"],
-    support: css(),
-  }),
-];
 
 function buildExtensions(
   hooks: {
@@ -149,7 +148,7 @@ function buildExtensions(
     bracketMatching(),
     markdown({
       base: markdownLanguage,
-      codeLanguages: fenceLanguages,
+      codeLanguages: languages,
       extensions: [HighlightExtension],
     }),
     syntaxHighlighting(markdownHighlightStyle),
@@ -182,6 +181,9 @@ function buildExtensions(
     editorTheme,
     flashField,
     EditorView.lineWrapping,
+    EditorView.domEventHandlers({
+      paste: pasteImageHandler,
+    }),
     EditorView.contentAttributes.of({
       spellcheck: "false",
       autocorrect: "off",
@@ -395,6 +397,13 @@ export function createEditor(
       view.dispatch({
         effects: phraseCompartment.reconfigure(EditorState.phrases.of(searchPhrases(locale))),
       });
+    },
+    setDocumentPath: (path) => {
+      setActiveDocumentPath(path);
+      view.dispatch({ effects: refreshPreview.of(null) });
+    },
+    run: (action) => {
+      action(view);
     },
   };
 }
