@@ -5,14 +5,18 @@ import {
   type ViewUpdate,
 } from "@codemirror/view";
 import {
+  insertBullet,
   insertFence,
   insertHeading,
+  insertHr,
   insertLink,
   insertQuote,
+  insertTable,
   toggleBold,
   toggleCode,
   toggleHighlight,
   toggleItalic,
+  toggleStrike,
   toggleTask,
 } from "./formatCommands";
 import { sourceModeField } from "./modes";
@@ -45,6 +49,7 @@ class FormatToolbar implements PluginValue {
       button("<>", "行内代码 Ctrl+E", () => toggleCode(view)),
       button("==", "高亮 Ctrl+Shift+H", () => toggleHighlight(view)),
       button("链接", "链接 Ctrl+K", () => insertLink(view)),
+      button("S", "删除线 Ctrl+Shift+U", () => toggleStrike(view)),
       button("任务", "任务 Ctrl+Enter", () => toggleTask(view)),
     );
     view.dom.appendChild(this.dom);
@@ -56,31 +61,38 @@ class FormatToolbar implements PluginValue {
       return;
     }
     if (!update.selectionSet && !update.docChanged && !update.geometryChanged) return;
-    this.sync();
-  }
-
-  sync() {
-    const selection = this.view.state.selection.main;
+    const selection = update.state.selection.main;
     if (selection.empty) {
       this.hide();
       return;
     }
-    const start = this.view.coordsAtPos(selection.from);
-    const end = this.view.coordsAtPos(selection.to);
-    if (!start || !end) {
-      this.hide();
-      return;
-    }
-    const editorRect = this.view.dom.getBoundingClientRect();
-    const top = Math.min(start.top, end.top) - editorRect.top - 40;
-    const left =
-      (Math.min(start.left, end.left) + Math.max(start.right, end.right)) / 2 -
-      editorRect.left;
-    this.dom.style.display = "flex";
-    this.dom.style.top = `${Math.max(4, top)}px`;
-    this.dom.style.left = `${Math.max(8, left)}px`;
-    this.dom.style.transform = "translateX(-50%)";
-    this.visible = true;
+    this.view.requestMeasure({
+      read: (view) => {
+        const current = view.state.selection.main;
+        if (current.empty) return null;
+        const start = view.coordsAtPos(current.from);
+        const end = view.coordsAtPos(current.to);
+        if (!start || !end) return null;
+        const editorRect = view.dom.getBoundingClientRect();
+        return {
+          top: Math.min(start.top, end.top) - editorRect.top - 40,
+          left:
+            (Math.min(start.left, end.left) + Math.max(start.right, end.right)) / 2 -
+            editorRect.left,
+        };
+      },
+      write: (measure) => {
+        if (!measure) {
+          this.hide();
+          return;
+        }
+        this.dom.style.display = "flex";
+        this.dom.style.top = `${Math.max(4, measure.top)}px`;
+        this.dom.style.left = `${Math.max(8, measure.left)}px`;
+        this.dom.style.transform = "translateX(-50%)";
+        this.visible = true;
+      },
+    });
   }
 
   hide() {
@@ -129,8 +141,11 @@ export const slashItems = [
   { label: "标题 1", run: (view: EditorView) => insertHeading(view, 1) },
   { label: "标题 2", run: (view: EditorView) => insertHeading(view, 2) },
   { label: "标题 3", run: (view: EditorView) => insertHeading(view, 3) },
+  { label: "无序列表", run: insertBullet },
   { label: "任务列表", run: toggleTask },
   { label: "引用", run: insertQuote },
   { label: "代码块", run: insertFence },
+  { label: "分隔线", run: insertHr },
+  { label: "表格", run: insertTable },
   { label: "链接", run: insertLink },
 ];

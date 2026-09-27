@@ -4,6 +4,7 @@ import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { ask } from "@tauri-apps/plugin-dialog";
 import {
+  createEffect,
   createMemo,
   createSignal,
   For,
@@ -11,6 +12,7 @@ import {
   onMount,
   Show,
 } from "solid-js";
+import { ackClosePrompt, resolveClose, setUnsaved } from "./api/close";
 import {
   listDirectory,
   openFolderPath,
@@ -137,6 +139,11 @@ export default function App() {
 
   const locale = createMemo(() => prefs().locale);
   const activeTab = createMemo(() => tabs().find((tab) => tab.id === activeTabId()) ?? null);
+
+  createEffect(() => {
+    const unsaved = tabs().some((tab) => tab.dirty);
+    if (isTauri()) void setUnsaved(unsaved).catch(() => {});
+  });
 
   function persistPrefs(next: Preferences) {
     setPrefs(next);
@@ -818,18 +825,24 @@ export default function App() {
     persistPrefs(initialPrefs);
     setNotice(t(initialPrefs.locale, "ready"));
 
-    editor = createEditor(host, {
-      onEdit() {
-        refreshStats();
-        refreshOutline();
-        markActiveDirty(true);
-      },
-      initialModes: {
-        sourceMode: initialPrefs.sourceMode,
-        typewriter: initialPrefs.typewriter,
-        focus: initialPrefs.focusMode,
-      },
-    });
+    try {
+      editor = createEditor(host, {
+        onEdit() {
+          refreshStats();
+          refreshOutline();
+          markActiveDirty(true);
+        },
+        initialModes: {
+          sourceMode: initialPrefs.sourceMode,
+          typewriter: initialPrefs.typewriter,
+          focus: initialPrefs.focusMode,
+        },
+        locale: initialPrefs.locale,
+      });
+    } catch (error) {
+      setNotice(`编辑器启动失败：${errorText(error)}`);
+      return;
+    }
 
     void (async () => {
       const restored = await restoreSession();
@@ -903,34 +916,51 @@ export default function App() {
       } else if (key === "t") {
         event.preventDefault();
         newDoc();
+      } else if (!event.shiftKey && (event.code === "Slash" || event.key === "/")) {
+        event.preventDefault();
+        event.stopPropagation();
+        toggleMode("sourceMode");
       }
     };
-    window.addEventListener("keydown", onKeyDown);
+    window.addEventListener("keydown", onKeyDown, true);
     window.addEventListener("click", closeMenu);
     window.addEventListener("beforeunload", flushSession);
 
     let unlistenClose: (() => void) | undefined;
     let unlistenChange: (() => void) | undefined;
     if (isTauri()) {
-      void getCurrentWindow()
-        .onCloseRequested(async (event) => {
+      void listen<number>("mosharp-confirm-close", (event) => {
+        const token = event.payload;
+        void (async () => {
+          try {
+            await ackClosePrompt(token);
+          } catch {
+            return;
+          }
           captureActive();
           flushSession();
           const dirtyTabs = tabs().filter((tab) => tab.dirty);
-          if (dirtyTabs.length === 0) return;
-          const confirmed = await ask(t(locale(), "discardClose"), {
-            title: "Mosharp",
-            kind: "warning",
-          });
-          if (!confirmed) {
-            event.preventDefault();
+          if (dirtyTabs.length === 0) {
+            await resolveClose(token, true);
             return;
           }
-          for (const tab of dirtyTabs) await backupTab(tab);
-        })
-        .then((stop) => {
-          unlistenClose = stop;
-        });
+          let confirmed = false;
+          try {
+            confirmed = await ask(t(locale(), "discardClose"), {
+              title: "Mosharp",
+              kind: "warning",
+            });
+          } catch {
+            confirmed = window.confirm(t(locale(), "discardClose"));
+          }
+          if (confirmed) {
+            for (const tab of dirtyTabs) await backupTab(tab);
+          }
+          await resolveClose(token, confirmed);
+        })();
+      }).then((stop) => {
+        unlistenClose = stop;
+      });
 
       void listen<{ path: string; kind: string }>("document-changed", (event) => {
         void onExternalDocumentChange(event.payload.path, event.payload.kind);
@@ -942,7 +972,7 @@ export default function App() {
     onCleanup(() => {
       flushSession();
       stopScroll();
-      window.removeEventListener("keydown", onKeyDown);
+      window.removeEventListener("keydown", onKeyDown, true);
       window.removeEventListener("click", closeMenu);
       window.removeEventListener("beforeunload", flushSession);
       if (dirtyFadeTimer) clearTimeout(dirtyFadeTimer);
@@ -969,55 +999,6 @@ export default function App() {
   return (
     <div class="app">
       <header class="chrome">
-        <strong class="brand">{t(locale(), "brand")}</strong>
-        <div class="tabs" role="tablist">
-          <For each={tabs()}>
-            {(tab) => (
-              <button
-                type="button"
-                role="tab"
-                class={`tab${tab.id === activeTabId() ? " active" : ""}`}
-                title={tab.path ?? t(locale(), "notWritten")}
-                aria-selected={tab.id === activeTabId()}
-                onClick={() => activateTab(tab.id)}
-                onContextMenu={(event) => {
-                  event.preventDefault();
-                  event.stopPropagation();
-                  setMenu({
-                    x: event.clientX,
-                    y: event.clientY,
-                    kind: "tab",
-                    tabId: tab.id,
-                    path: tab.path ?? undefined,
-                  });
-                }}
-              >
-                <span class={`tab-dot${tab.dirty ? " on" : ""}`} aria-hidden="true">
-                  ●
-                </span>
-                <span class="tab-name">{documentName(tab.path, t(locale(), "untitled"))}</span>
-                <span
-                  class="tab-close"
-                  title={t(locale(), "close")}
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    void closeTab(tab.id);
-                  }}
-                >
-                  ×
-                </span>
-              </button>
-            )}
-          </For>
-          <button
-            type="button"
-            class="tab-add"
-            title={`${t(locale(), "new")} (Ctrl+T)`}
-            onClick={() => newDoc()}
-          >
-            +
-          </button>
-        </div>
         <div class="chrome-actions">
           <Show when={dirtyBadge()}>
             <span class="dirty-fade">{t(locale(), "unsaved")}</span>
@@ -1074,7 +1055,7 @@ export default function App() {
           <button
             type="button"
             class={prefs().sourceMode ? "mode-on" : ""}
-            title="纯源码（关掉实时预览装饰）"
+            title="Ctrl+/ 源码模式，再按一次回到预览"
             onClick={() => toggleMode("sourceMode")}
           >
             {t(locale(), "sourceMode")}
@@ -1113,6 +1094,7 @@ export default function App() {
               onChange={(event) => {
                 const next = event.currentTarget.value as Locale;
                 patchPrefs({ locale: next });
+                editor?.setPhrases(next);
                 setNotice(t(next, "ready"));
                 void syncTitle();
               }}
@@ -1123,6 +1105,55 @@ export default function App() {
           </label>
           <button type="button" onClick={() => void loadBenchmark()}>
             {t(locale(), "benchmark")}
+          </button>
+        </div>
+        <div class="tabs" role="tablist">
+          <For each={tabs()}>
+            {(tab) => (
+              <div
+                role="tab"
+                class={`tab${tab.id === activeTabId() ? " active" : ""}`}
+                title={tab.path ?? t(locale(), "notWritten")}
+                aria-selected={tab.id === activeTabId()}
+                onContextMenu={(event) => {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  setMenu({
+                    x: event.clientX,
+                    y: event.clientY,
+                    kind: "tab",
+                    tabId: tab.id,
+                    path: tab.path ?? undefined,
+                  });
+                }}
+              >
+                <button type="button" class="tab-main" onClick={() => activateTab(tab.id)}>
+                  <span class={`tab-dot${tab.dirty ? " on" : ""}`} aria-hidden="true">
+                    ●
+                  </span>
+                  <span class="tab-name">{documentName(tab.path, t(locale(), "untitled"))}</span>
+                </button>
+                <button
+                  type="button"
+                  class="tab-close"
+                  title={t(locale(), "close")}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    void closeTab(tab.id);
+                  }}
+                >
+                  ×
+                </button>
+              </div>
+            )}
+          </For>
+          <button
+            type="button"
+            class="tab-add"
+            title={`${t(locale(), "new")} (Ctrl+T)`}
+            onClick={() => newDoc()}
+          >
+            +
           </button>
         </div>
       </header>

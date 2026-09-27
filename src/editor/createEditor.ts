@@ -18,21 +18,21 @@ import {
   syntaxHighlighting,
 } from "@codemirror/language";
 import { highlightSelectionMatches, search, searchKeymap } from "@codemirror/search";
-import { EditorState, StateEffect, StateField, type Extension } from "@codemirror/state";
+import { Compartment, EditorState, type Extension } from "@codemirror/state";
 import {
-  Decoration,
   drawSelection,
   EditorView,
   highlightActiveLine,
   highlightActiveLineGutter,
   keymap,
   lineNumbers,
-  type DecorationSet,
 } from "@codemirror/view";
 import { markdownHighlightStyle } from "./highlight";
+import { searchPhrases, type EditorLocale } from "./phrases";
+import { flashEffect, flashField } from "./preview/flash";
 import { HighlightExtension } from "./preview/highlightExt";
-import { linkClickHandler } from "./preview/links";
-import { livePreviewPlugin, livePreviewTheme } from "./preview/livePreview";
+import { linkClickHandler, linkModCursor } from "./preview/links";
+import { hiddenLineNumberField, livePreviewPlugin, livePreviewTheme } from "./preview/livePreview";
 import {
   focusModeField,
   setFocusMode,
@@ -68,7 +68,11 @@ export const INITIAL_DOCUMENT = `# 未命名
 | --- | --- |
 | 1 | 2 |
 
-选中文字会出现浮动格式条；行首输入 \`/\` 打开插入菜单。
+[跳到中文标题](#中文标题)。选中文字会出现浮动格式条；行首输入 \`/\` 打开插入菜单。
+
+## 中文标题
+
+标题锚点可以跳到这里。
 
 \`\`\`js
 const hello = "world"
@@ -101,6 +105,7 @@ export interface EditorController {
   measureScroll: () => Promise<number>;
   getModes: () => PreviewModes;
   setModes: (partial: Partial<PreviewModes>) => void;
+  setPhrases: (locale: EditorLocale) => void;
 }
 
 const fenceLanguages = [
@@ -121,33 +126,18 @@ const fenceLanguages = [
   }),
 ];
 
-const flashEffect = StateEffect.define<number | null>();
-
-const flashField = StateField.define<DecorationSet>({
-  create() {
-    return Decoration.none;
+function buildExtensions(
+  hooks: {
+    onEdit: () => void;
+    shouldIgnoreEdit: () => boolean;
   },
-  update(value, transaction) {
-    for (const effect of transaction.effects) {
-      if (effect.is(flashEffect)) {
-        if (effect.value == null) return Decoration.none;
-        const line = transaction.state.doc.line(effect.value);
-        return Decoration.set([
-          Decoration.line({ class: "cm-heading-flash" }).range(line.from),
-        ]);
-      }
-    }
-    return value.map(transaction.changes);
-  },
-  provide: (field) => EditorView.decorations.from(field),
-});
-
-function buildExtensions(hooks: {
-  onEdit: () => void;
-  shouldIgnoreEdit: () => boolean;
-}): Extension[] {
+  phraseCompartment: Compartment,
+  locale: EditorLocale,
+): Extension[] {
   return [
+    phraseCompartment.of(EditorState.phrases.of(searchPhrases(locale))),
     lineNumbers(),
+    hiddenLineNumberField,
     highlightActiveLineGutter(),
     highlightActiveLine(),
     history(),
@@ -187,6 +177,7 @@ function buildExtensions(hooks: {
     paragraphGutterRefresh,
     paragraphMenuTheme,
     linkClickHandler,
+    linkModCursor,
     richCopyHandler,
     editorTheme,
     flashField,
@@ -205,19 +196,24 @@ function buildExtensions(hooks: {
 
 export function createEditor(
   parent: HTMLElement,
-  hooks: { onEdit: () => void; initialModes?: PreviewModes },
+  hooks: { onEdit: () => void; initialModes?: PreviewModes; locale?: EditorLocale },
 ): EditorController {
   let applying = false;
+  const phraseCompartment = new Compartment();
   const modes: PreviewModes = {
     sourceMode: hooks.initialModes?.sourceMode ?? false,
     typewriter: hooks.initialModes?.typewriter ?? false,
     focus: hooks.initialModes?.focus ?? false,
   };
 
-  const extensions = buildExtensions({
-    onEdit: hooks.onEdit,
-    shouldIgnoreEdit: () => applying,
-  });
+  const extensions = buildExtensions(
+    {
+      onEdit: hooks.onEdit,
+      shouldIgnoreEdit: () => applying,
+    },
+    phraseCompartment,
+    hooks.locale ?? "zh-CN",
+  );
 
   const view = new EditorView({
     parent,
@@ -394,6 +390,11 @@ export function createEditor(
       if (partial.typewriter != null) modes.typewriter = partial.typewriter;
       if (partial.focus != null) modes.focus = partial.focus;
       syncModeEffects();
+    },
+    setPhrases: (locale) => {
+      view.dispatch({
+        effects: phraseCompartment.reconfigure(EditorState.phrases.of(searchPhrases(locale))),
+      });
     },
   };
 }

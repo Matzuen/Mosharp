@@ -1,8 +1,11 @@
+import type { SyntaxNode } from "@lezer/common";
 import { syntaxTree } from "@codemirror/language";
-import type { EditorState, Range } from "@codemirror/state";
+import { RangeSet, StateEffect, StateField, type Range } from "@codemirror/state";
 import {
   Decoration,
   EditorView,
+  GutterMarker,
+  lineNumberMarkers,
   ViewPlugin,
   WidgetType,
   type DecorationSet,
@@ -14,6 +17,19 @@ import { focusModeField, sourceModeField } from "./modes";
 const LARGE_DOC_LINES = 8_000;
 /** Wait after last scroll before rebuilding preview on large docs. */
 const SCROLL_IDLE_MS = 72;
+
+const MARK_NAMES = new Set([
+  "HeaderMark",
+  "EmphasisMark",
+  "StrikethroughMark",
+  "HighlightMark",
+  "CodeMark",
+  "QuoteMark",
+  "ListMark",
+  "LinkMark",
+  "TableDelimiter",
+  "CodeInfo",
+]);
 
 class TaskCheckboxWidget extends WidgetType {
   constructor(
@@ -35,17 +51,40 @@ class TaskCheckboxWidget extends WidgetType {
     box.checked = this.checked;
     box.tabIndex = -1;
     box.setAttribute("aria-label", "任务");
-    box.addEventListener("mousedown", (event) => event.preventDefault());
-    box.addEventListener("click", (event) => {
+    box.addEventListener("mousedown", (event) => {
       event.preventDefault();
+      event.stopPropagation();
       const next = this.checked ? "[ ]" : "[x]";
+      const max = view.state.doc.length;
+      const from = Math.min(this.from, max);
+      const to = Math.min(this.to, max);
+      if (from >= to) return;
       view.dispatch({
-        changes: { from: this.from, to: this.to, insert: next },
-        selection: { anchor: Math.min(this.from + next.length, view.state.doc.length) },
+        changes: { from, to, insert: next },
       });
-      view.focus();
     });
     return box;
+  }
+
+  ignoreEvent(event: Event) {
+    return event.type === "mousedown" || event.type === "click";
+  }
+}
+
+class BulletWidget extends WidgetType {
+  constructor(readonly label: string, readonly kind: "bullet" | "ordered") {
+    super();
+  }
+
+  eq(other: BulletWidget) {
+    return this.label === other.label && this.kind === other.kind;
+  }
+
+  toDOM() {
+    const span = document.createElement("span");
+    span.className = this.kind === "ordered" ? "cm-md-ol" : "cm-md-bullet";
+    span.textContent = this.label;
+    return span;
   }
 
   ignoreEvent() {
@@ -67,53 +106,292 @@ class HrWidget extends WidgetType {
 
 const hrWidget = new HrWidget();
 
-function lineOf(state: EditorState, pos: number) {
-  return state.doc.lineAt(pos).number;
+class CollapseWidget extends WidgetType {
+  eq() {
+    return true;
+  }
+
+  get estimatedHeight() {
+    return 0;
+  }
+
+  toDOM() {
+    const span = document.createElement("span");
+    span.className = "cm-md-collapse";
+    return span;
+  }
 }
 
-function hideRange(
-  from: number,
-  to: number,
-  cursorLines: Set<number>,
-  state: EditorState,
-  out: Range<Decoration>[],
+const collapseWidget = new CollapseWidget();
+
+class FenceWidget extends WidgetType {
+  constructor(readonly label: string) {
+    super();
+  }
+
+  eq(other: FenceWidget) {
+    return this.label === other.label;
+  }
+
+  toDOM() {
+    const el = document.createElement("span");
+    el.className = "cm-md-fence";
+    el.textContent = this.label;
+    return el;
+  }
+}
+
+class TableWidget extends WidgetType {
+  dom: HTMLElement | null = null;
+
+  constructor(
+    readonly source: string,
+    readonly from: number,
+  ) {
+    super();
+  }
+
+  eq(other: TableWidget) {
+    if (this.source === other.source) return true;
+    // Keep the live cells when a commit rewrites the row under the caret.
+    return this.dom != null && this.dom.contains(document.activeElement);
+  }
+
+  get estimatedHeight() {
+    return Math.max(48, this.source.split("\n").length * 34);
+  }
+
+  toDOM(view: EditorView) {
+    const table = document.createElement("table");
+    table.className = "cm-md-table-widget";
+    const lines = this.source.split("\n").filter((line) => line.trim().length > 0);
+    const header = splitCells(lines[0] ?? "");
+    const aligns = lines[1] && isDelimiterRow(lines[1]) ? splitCells(lines[1]).map(alignment) : [];
+    const bodyStart = lines[1] && isDelimiterRow(lines[1]) ? 2 : 1;
+
+    const commitAt = (row: number, col: number, text: string) => {
+      const pos = this.from;
+      queueMicrotask(() => commitCell(view, pos, row, col, text));
+    };
+
+    const thead = document.createElement("thead");
+    thead.appendChild(renderRow(header, aligns, "th", 0, commitAt));
+    table.appendChild(thead);
+
+    const tbody = document.createElement("tbody");
+    let visualRow = 1;
+    for (let i = bodyStart; i < lines.length; i += 1) {
+      if (isDelimiterRow(lines[i])) continue;
+      tbody.appendChild(renderRow(splitCells(lines[i]), aligns, "td", visualRow, commitAt));
+      visualRow += 1;
+    }
+    table.appendChild(tbody);
+    this.dom = table;
+    return table;
+  }
+
+  ignoreEvent() {
+    return true;
+  }
+}
+
+function splitCells(line: string): string[] {
+  let text = line.trim();
+  if (text.startsWith("|")) text = text.slice(1);
+  if (text.endsWith("|")) text = text.slice(0, -1);
+  return text.split("|").map((cell) => cell.trim());
+}
+
+function isDelimiterRow(line: string): boolean {
+  const cells = splitCells(line);
+  return cells.length > 0 && cells.every((cell) => /^:?-+:?$/.test(cell));
+}
+
+function alignment(cell: string): "left" | "center" | "right" {
+  const left = cell.startsWith(":");
+  const right = cell.endsWith(":");
+  if (left && right) return "center";
+  if (right) return "right";
+  return "left";
+}
+
+function renderRow(
+  cells: string[],
+  aligns: Array<"left" | "center" | "right">,
+  tag: "th" | "td",
+  visualRow: number,
+  onCommit: (row: number, col: number, text: string) => void,
 ) {
+  const row = document.createElement("tr");
+  for (let i = 0; i < cells.length; i += 1) {
+    const cell = document.createElement(tag);
+    const original = cells[i];
+    cell.textContent = original;
+    cell.contentEditable = "true";
+    cell.spellcheck = false;
+    cell.style.textAlign = aligns[i] ?? "left";
+    cell.addEventListener("mousedown", (event) => event.stopPropagation());
+    const commit = () => {
+      const next = (cell.textContent ?? "").replace(/\n/g, " ").replace(/\|/g, "").trim();
+      if (next !== original) onCommit(visualRow, i, next);
+    };
+    cell.addEventListener("keydown", (event) => {
+      event.stopPropagation();
+      if (event.key === "Enter" && !event.shiftKey) {
+        event.preventDefault();
+        commit();
+        cell.blur();
+      }
+    });
+    cell.addEventListener("blur", commit);
+    row.appendChild(cell);
+  }
+  return row;
+}
+
+function commitCell(view: EditorView, pos: number, visualRow: number, col: number, text: string) {
+  if (pos < 0 || pos > view.state.doc.length) return;
+  const lines: Array<{ from: number; to: number; text: string }> = [];
+  let lineNo = view.state.doc.lineAt(pos).number;
+  while (lineNo <= view.state.doc.lines && lines.length < 200) {
+    const line = view.state.doc.line(lineNo);
+    if (lines.length > 0 && !line.text.includes("|")) break;
+    if (!line.text.includes("|")) break;
+    lines.push({ from: line.from, to: line.to, text: line.text });
+    lineNo += 1;
+  }
+  const hasDelimiter = lines[1] != null && isDelimiterRow(lines[1].text);
+  const sourceIndex = !hasDelimiter || visualRow === 0 ? visualRow : visualRow + 1;
+  const target = lines[sourceIndex];
+  if (!target || isDelimiterRow(target.text)) return;
+  const cells = splitCells(target.text);
+  while (cells.length <= col) cells.push("");
+  if (cells[col] === text) return;
+  cells[col] = text;
+  view.dispatch({
+    changes: { from: target.from, to: target.to, insert: `| ${cells.join(" | ")} |` },
+  });
+}
+
+function listItemHasTask(node: { node: SyntaxNode }) {
+  const parent = node.node.parent;
+  if (!parent || parent.name !== "ListItem") return false;
+  for (let child = parent.firstChild; child; child = child.nextSibling) {
+    if (child.name === "Task") return true;
+  }
+  return false;
+}
+
+class HiddenLineNumber extends GutterMarker {
+  eq() {
+    return true;
+  }
+
+  toDOM() {
+    return document.createTextNode("");
+  }
+}
+
+const hiddenLineNumber = new HiddenLineNumber();
+const setHiddenLineNumbers = StateEffect.define<RangeSet<GutterMarker>>();
+
+/** Replaces the digits on collapsed table/setext lines so they cannot stack. */
+export const hiddenLineNumberField = StateField.define<RangeSet<GutterMarker>>({
+  create() {
+    return RangeSet.empty;
+  },
+  update(value, tr) {
+    let next = value.map(tr.changes);
+    for (const effect of tr.effects) {
+      if (effect.is(setHiddenLineNumbers)) next = effect.value;
+    }
+    return next;
+  },
+  provide: (field) => lineNumberMarkers.from(field),
+});
+
+interface PreviewBuild {
+  decos: Range<Decoration>[];
+  atomic: Range<Decoration>[];
+  lineClasses: Map<number, Set<string>>;
+  covered: Array<{ from: number; to: number }>;
+  hidden: number[];
+}
+
+function isCovered(build: PreviewBuild, from: number, to: number) {
+  return build.covered.some((range) => from >= range.from && to <= range.to);
+}
+
+function addLineClass(build: PreviewBuild, line: number, className: string) {
+  let set = build.lineClasses.get(line);
+  if (!set) {
+    set = new Set();
+    build.lineClasses.set(line, set);
+  }
+  set.add(className);
+}
+
+function hide(build: PreviewBuild, from: number, to: number, widget?: WidgetType) {
   if (to <= from) return;
-  if (cursorLines.has(lineOf(state, from)) || cursorLines.has(lineOf(state, to - 1))) return;
-  out.push(Decoration.replace({}).range(from, to));
+  const deco = Decoration.replace(widget ? { widget } : {}).range(from, to);
+  build.decos.push(deco);
+  build.atomic.push(deco);
+}
+
+/** Cursor is inside the range, including either edge, so a mark just typed stays visible. */
+function rangeHasCursor(view: EditorView, from: number, to: number) {
+  for (const range of view.state.selection.ranges) {
+    if (range.head >= from && range.head <= to) return true;
+  }
+  return false;
+}
+
+function lineHasCursor(view: EditorView, lineNo: number) {
+  const line = view.state.doc.line(lineNo);
+  return rangeHasCursor(view, line.from, line.to);
+}
+
+/** Inline delimiter stays visible while the caret is in that span, not on the rest of the line. */
+function parentHoldsCursor(view: EditorView, node: SyntaxNode) {
+  const parent = node.parent;
+  if (!parent) return rangeHasCursor(view, node.from, node.to);
+  return rangeHasCursor(view, parent.from, parent.to);
+}
+
+function showSyntax(build: PreviewBuild, from: number, to: number) {
+  if (to <= from) return;
+  build.decos.push(Decoration.mark({ class: "cm-md-syntax" }).range(from, to));
+}
+
+function markSpan(build: PreviewBuild, from: number, to: number, className: string) {
+  if (to <= from) return;
+  build.decos.push(Decoration.mark({ class: className }).range(from, to));
 }
 
 function decorateRange(
   view: EditorView,
   from: number,
   to: number,
-  cursorLines: Set<number>,
   focusMode: boolean,
   activeBlock: { from: number; to: number } | null,
-  decos: Range<Decoration>[],
-  seenLines: Set<number>,
+  build: PreviewBuild,
 ) {
   syntaxTree(view.state).iterate({
     from,
     to,
     enter(node) {
+      if (isCovered(build, node.from, node.to)) return false;
       const name = node.name;
 
       if (/^ATXHeading\d$/.test(name) || /^SetextHeading\d$/.test(name)) {
         const line = view.state.doc.lineAt(node.from);
-        if (!seenLines.has(line.number)) {
-          seenLines.add(line.number);
-          decos.push(
-            Decoration.line({
-              class: `cm-md-heading cm-md-${name}`,
-            }).range(line.from),
-          );
-        }
+        addLineClass(build, line.number, `cm-md-heading cm-md-${name}`);
       }
 
       if (name === "Blockquote") {
-        const line = view.state.doc.lineAt(node.from);
-        decos.push(Decoration.line({ class: "cm-md-quote" }).range(line.from));
+        const start = view.state.doc.lineAt(node.from).number;
+        const end = view.state.doc.lineAt(Math.max(node.from, node.to - 1)).number;
+        for (let n = start; n <= end; n += 1) addLineClass(build, n, "cm-md-quote");
       }
 
       if (name === "FencedCode" || name === "IndentedCode") {
@@ -122,32 +400,89 @@ function decorateRange(
         for (let n = start.number; n <= end.number; n += 1) {
           const line = view.state.doc.line(n);
           if (line.from > to || line.to < from) continue;
-          decos.push(Decoration.line({ class: "cm-md-codeblock" }).range(line.from));
+          addLineClass(build, n, "cm-md-codeblock");
+          if (name === "FencedCode" && /^`{3,}/.test(line.text) && !lineHasCursor(view, n)) {
+            const lang = line.text.replace(/^`{3,}/, "").trim();
+            const widget = new FenceWidget(lang ? lang : n === start.number ? "" : "");
+            const deco = Decoration.replace({ widget }).range(line.from, line.to);
+            build.decos.push(deco);
+            build.atomic.push(deco);
+            build.covered.push({ from: line.from, to: line.to });
+          }
         }
       }
 
       if (name === "Table") {
         const start = view.state.doc.lineAt(node.from);
         const end = view.state.doc.lineAt(Math.max(node.from, node.to - 1));
-        for (let n = start.number; n <= end.number; n += 1) {
+        const source = view.state.doc.sliceString(start.from, end.to);
+        const head = Decoration.replace({
+          widget: new TableWidget(source, start.from),
+        }).range(start.from, start.to);
+        build.decos.push(head);
+        build.atomic.push(head);
+        for (let n = start.number + 1; n <= end.number; n += 1) {
           const line = view.state.doc.line(n);
-          if (line.from > to || line.to < from) continue;
-          decos.push(Decoration.line({ class: "cm-md-table" }).range(line.from));
+          const deco = Decoration.replace({ widget: collapseWidget }).range(line.from, line.to);
+          build.decos.push(deco);
+          build.atomic.push(deco);
+          addLineClass(build, n, "cm-md-sink");
+          build.hidden.push(line.from);
         }
+        build.covered.push({ from: start.from, to: end.to });
+        return false;
       }
 
       if (name === "HorizontalRule") {
         const line = view.state.doc.lineAt(node.from);
-        decos.push(Decoration.line({ class: "cm-md-hr" }).range(line.from));
-        if (!cursorLines.has(line.number)) {
-          decos.push(Decoration.replace({ widget: hrWidget }).range(node.from, node.to));
+        if (!lineHasCursor(view, line.number)) {
+          const deco = Decoration.replace({ widget: hrWidget }).range(line.from, line.to);
+          build.decos.push(deco);
+          build.atomic.push(deco);
+          build.covered.push({ from: line.from, to: line.to });
+          return false;
         }
       }
 
       if (name === "HeaderMark") {
+        const line = view.state.doc.lineAt(node.from);
+        if (/^\s*[-=]+\s*$/.test(line.text)) {
+          if (!lineHasCursor(view, line.number)) {
+            const deco = Decoration.replace({ widget: collapseWidget }).range(line.from, line.to);
+            build.decos.push(deco);
+            build.atomic.push(deco);
+            addLineClass(build, line.number, "cm-md-sink");
+            build.hidden.push(line.from);
+          }
+        } else {
+          let end = node.to;
+          while (view.state.doc.sliceString(end, end + 1) === " ") end += 1;
+          if (parentHoldsCursor(view, node.node)) showSyntax(build, node.from, end);
+          else hide(build, node.from, end);
+        }
+      }
+
+      if (name === "QuoteMark") {
         let end = node.to;
         if (view.state.doc.sliceString(end, end + 1) === " ") end += 1;
-        hideRange(node.from, end, cursorLines, view.state, decos);
+        const lineNo = view.state.doc.lineAt(node.from).number;
+        if (lineHasCursor(view, lineNo)) showSyntax(build, node.from, end);
+        else hide(build, node.from, end);
+      }
+
+      if (name === "ListMark") {
+        const text = view.state.doc.sliceString(node.from, node.to);
+        let end = node.to;
+        if (view.state.doc.sliceString(end, end + 1) === " ") end += 1;
+        if (rangeHasCursor(view, node.from, end)) {
+          showSyntax(build, node.from, end);
+        } else if (listItemHasTask(node)) {
+          hide(build, node.from, end);
+        } else if (/^\d/.test(text)) {
+          hide(build, node.from, node.to, new BulletWidget(text, "ordered"));
+        } else {
+          hide(build, node.from, node.to, new BulletWidget("•", "bullet"));
+        }
       }
 
       if (
@@ -155,50 +490,48 @@ function decorateRange(
         name === "StrikethroughMark" ||
         name === "HighlightMark" ||
         name === "CodeMark" ||
-        name === "QuoteMark" ||
-        name === "ListMark" ||
         name === "LinkMark" ||
-        name === "TableDelimiter" ||
         name === "CodeInfo"
       ) {
-        hideRange(node.from, node.to, cursorLines, view.state, decos);
+        if (parentHoldsCursor(view, node.node)) showSyntax(build, node.from, node.to);
+        else hide(build, node.from, node.to);
       }
 
       if (name === "URL") {
-        hideRange(node.from, node.to, cursorLines, view.state, decos);
+        if (parentHoldsCursor(view, node.node)) showSyntax(build, node.from, node.to);
+        else hide(build, node.from, node.to);
       }
 
       if (name === "StrongEmphasis") {
-        decos.push(Decoration.mark({ class: "cm-md-strong" }).range(node.from, node.to));
+        markSpan(build, node.from, node.to, "cm-md-strong");
       }
       if (name === "Emphasis" && node.node.parent?.name !== "StrongEmphasis") {
-        decos.push(Decoration.mark({ class: "cm-md-em" }).range(node.from, node.to));
+        markSpan(build, node.from, node.to, "cm-md-em");
       }
       if (name === "Strikethrough") {
-        decos.push(Decoration.mark({ class: "cm-md-strike" }).range(node.from, node.to));
+        markSpan(build, node.from, node.to, "cm-md-strike");
       }
       if (name === "Highlight") {
-        decos.push(Decoration.mark({ class: "cm-md-highlight" }).range(node.from, node.to));
+        markSpan(build, node.from, node.to, "cm-md-highlight");
       }
       if (name === "InlineCode") {
-        decos.push(Decoration.mark({ class: "cm-md-code" }).range(node.from, node.to));
+        markSpan(build, node.from, node.to, "cm-md-code");
       }
       if (name === "Link") {
-        decos.push(Decoration.mark({ class: "cm-md-link" }).range(node.from, node.to));
+        markSpan(build, node.from, node.to, "cm-md-link");
       }
 
       if (name === "TaskMarker") {
         const text = view.state.doc.sliceString(node.from, node.to);
         const checked = /\[x\]/i.test(text);
-        if (!cursorLines.has(lineOf(view.state, node.from))) {
-          decos.push(
-            Decoration.replace({
-              widget: new TaskCheckboxWidget(checked, node.from, node.to),
-            }).range(node.from, node.to),
-          );
-        }
+        const deco = Decoration.replace({
+          widget: new TaskCheckboxWidget(checked, node.from, node.to),
+        }).range(node.from, node.to);
+        build.decos.push(deco);
+        build.atomic.push(deco);
       }
 
+      if (MARK_NAMES.has(name)) return false;
       return true;
     },
   });
@@ -209,32 +542,63 @@ function decorateRange(
     for (let n = startLine; n <= endLine; n += 1) {
       const line = view.state.doc.line(n);
       if (line.to < activeBlock.from || line.from > activeBlock.to) {
-        decos.push(Decoration.line({ class: "cm-md-dim" }).range(line.from));
+        addLineClass(build, n, "cm-md-dim");
       }
     }
   }
 }
 
-function buildDecorations(view: EditorView): DecorationSet {
-  if (view.state.field(sourceModeField)) return Decoration.none;
+function hiddenMarkers(positions: number[]): RangeSet<GutterMarker> {
+  if (positions.length === 0) return RangeSet.empty;
+  const unique = [...new Set(positions)].sort((a, b) => a - b);
+  return RangeSet.of(
+    unique.map((from) => hiddenLineNumber.range(from)),
+    true,
+  );
+}
 
-  const cursorLines = new Set<number>();
-  for (const range of view.state.selection.ranges) {
-    cursorLines.add(lineOf(view.state, range.head));
-    cursorLines.add(lineOf(view.state, range.anchor));
-  }
+const emptyPreview = {
+  decorations: Decoration.none,
+  atomic: Decoration.none,
+  hidden: RangeSet.empty as RangeSet<GutterMarker>,
+};
+
+function buildDecorations(view: EditorView): {
+  decorations: DecorationSet;
+  atomic: DecorationSet;
+  hidden: RangeSet<GutterMarker>;
+} {
+  if (view.state.field(sourceModeField)) return emptyPreview;
 
   const focusMode = view.state.field(focusModeField);
   const activeBlock = focusMode ? findActiveBlock(view) : null;
-  const decos: Range<Decoration>[] = [];
-  const seenLines = new Set<number>();
+  const build: PreviewBuild = {
+    decos: [],
+    atomic: [],
+    lineClasses: new Map(),
+    covered: [],
+    hidden: [],
+  };
 
-  // Only the visible ranges — never force-parse ahead of the language package.
-  for (const { from, to } of view.visibleRanges) {
-    decorateRange(view, from, to, cursorLines, focusMode, activeBlock, decos, seenLines);
+  for (const range of view.visibleRanges) {
+    decorateRange(view, range.from, range.to, focusMode, activeBlock, build);
   }
 
-  return Decoration.set(decos, true);
+  for (const [lineNo, classes] of build.lineClasses) {
+    const line = view.state.doc.line(lineNo);
+    build.decos.push(Decoration.line({ class: [...classes].join(" ") }).range(line.from));
+  }
+
+  try {
+    return {
+      decorations: Decoration.set(build.decos, true),
+      atomic: Decoration.set(build.atomic, true),
+      hidden: hiddenMarkers(build.hidden),
+    };
+  } catch (error) {
+    console.error("live preview decorations skipped", error);
+    return emptyPreview;
+  }
 }
 
 function findActiveBlock(view: EditorView): { from: number; to: number } | null {
@@ -273,11 +637,18 @@ function findActiveBlock(view: EditorView): { from: number; to: number } | null 
 export const livePreviewPlugin = ViewPlugin.fromClass(
   class {
     decorations: DecorationSet;
+    atomic: DecorationSet;
+    sinkMarkers: RangeSet<GutterMarker>;
     private idleTimer: ReturnType<typeof setTimeout> | null = null;
     private pendingIdle = false;
+    private sinkQueued = false;
 
     constructor(view: EditorView) {
-      this.decorations = buildDecorations(view);
+      const built = buildDecorations(view);
+      this.decorations = built.decorations;
+      this.atomic = built.atomic;
+      this.sinkMarkers = built.hidden;
+      this.scheduleSinkSync(view);
     }
 
     update(update: ViewUpdate) {
@@ -285,40 +656,58 @@ export const livePreviewPlugin = ViewPlugin.fromClass(
       if (source) {
         this.clearIdle();
         this.decorations = Decoration.none;
+        this.atomic = Decoration.none;
+        this.sinkMarkers = RangeSet.empty;
+        this.scheduleSinkSync(update.view);
         return;
       }
 
       const modesChanged =
         update.startState.field(sourceModeField) !== source ||
         update.startState.field(focusModeField) !== update.state.field(focusModeField);
+      const treeChanged = syntaxTree(update.state) !== syntaxTree(update.startState);
 
       if (this.pendingIdle) {
         this.pendingIdle = false;
-        this.decorations = buildDecorations(update.view);
+        this.apply(update.view);
         return;
       }
 
-      if (update.docChanged) {
+      if (update.docChanged || update.selectionSet || modesChanged || treeChanged) {
         this.clearIdle();
-        this.decorations = this.decorations.map(update.changes);
-        this.decorations = buildDecorations(update.view);
-        return;
-      }
-
-      if (update.selectionSet || modesChanged) {
-        this.clearIdle();
-        this.decorations = buildDecorations(update.view);
+        this.apply(update.view);
         return;
       }
 
       if (update.viewportChanged) {
         if (update.state.doc.lines >= LARGE_DOC_LINES) {
-          // Keep scrolling free; decorate once the thumb stops.
           this.scheduleIdle(update.view);
           return;
         }
-        this.decorations = buildDecorations(update.view);
+        this.apply(update.view);
       }
+    }
+
+    private apply(view: EditorView) {
+      const built = buildDecorations(view);
+      this.decorations = built.decorations;
+      this.atomic = built.atomic;
+      this.sinkMarkers = built.hidden;
+      this.scheduleSinkSync(view);
+    }
+
+    private scheduleSinkSync(view: EditorView) {
+      const current = view.state.field(hiddenLineNumberField);
+      if (RangeSet.eq([current], [this.sinkMarkers])) return;
+      if (this.sinkQueued) return;
+      this.sinkQueued = true;
+      queueMicrotask(() => {
+        this.sinkQueued = false;
+        if (!view.dom.isConnected) return;
+        const latest = view.state.field(hiddenLineNumberField);
+        if (RangeSet.eq([latest], [this.sinkMarkers])) return;
+        view.dispatch({ effects: setHiddenLineNumbers.of(this.sinkMarkers) });
+      });
     }
 
     private scheduleIdle(view: EditorView) {
@@ -344,15 +733,24 @@ export const livePreviewPlugin = ViewPlugin.fromClass(
   },
   {
     decorations: (value) => value.decorations,
+    provide: (plugin) =>
+      EditorView.atomicRanges.of((view) => view.plugin(plugin)?.atomic ?? Decoration.none),
   },
 );
 
 export const livePreviewTheme = EditorView.baseTheme({
   ".cm-md-heading": { fontWeight: "700", lineHeight: "1.35" },
-  ".cm-md-ATXHeading1": { fontSize: "1.55em" },
-  ".cm-md-ATXHeading2": { fontSize: "1.35em" },
-  ".cm-md-ATXHeading3": { fontSize: "1.18em" },
-  ".cm-md-ATXHeading4,.cm-md-ATXHeading5,.cm-md-ATXHeading6": { fontSize: "1.05em" },
+  ".cm-md-ATXHeading1, .cm-md-SetextHeading1": {
+    fontSize: "1.7em",
+    paddingTop: "0.45em",
+    paddingBottom: "0.1em",
+  },
+  ".cm-md-ATXHeading2, .cm-md-SetextHeading2": {
+    fontSize: "1.4em",
+    paddingTop: "0.4em",
+  },
+  ".cm-md-ATXHeading3": { fontSize: "1.2em", paddingTop: "0.3em" },
+  ".cm-md-ATXHeading4, .cm-md-ATXHeading5, .cm-md-ATXHeading6": { fontSize: "1.05em" },
   ".cm-md-strong": { fontWeight: "700" },
   ".cm-md-em": { fontStyle: "italic" },
   ".cm-md-strike": { textDecoration: "line-through", color: "#78716c" },
@@ -365,28 +763,89 @@ export const livePreviewTheme = EditorView.baseTheme({
     fontSize: "0.92em",
     backgroundColor: "rgba(159, 18, 57, 0.08)",
     borderRadius: "3px",
+    padding: "0 3px",
+  },
+  ".cm-md-syntax": {
+    color: "var(--faint)",
+    fontWeight: "500",
+    fontSize: "0.72em",
+    fontFamily: 'Consolas, "Courier New", monospace',
   },
   ".cm-md-link": { color: "#1d4ed8", textDecoration: "underline" },
+  ".cm-mod-held .cm-md-link": { cursor: "pointer" },
   ".cm-md-quote": {
-    color: "#57534e",
+    color: "#44403c",
     borderLeft: "3px solid #d6d3d1",
-    paddingLeft: "10px",
+    paddingLeft: "12px",
   },
   ".cm-md-codeblock": {
-    backgroundColor: "rgba(28, 25, 23, 0.04)",
+    backgroundColor: "#f3f1ec",
     fontFamily: 'Consolas, "Courier New", monospace',
     fontSize: "0.92em",
   },
-  ".cm-md-table": {
-    fontVariantNumeric: "tabular-nums",
+  ".cm-md-table-source": {
     fontFamily: 'Consolas, "Courier New", ui-monospace, monospace',
-    fontSize: "0.95em",
+    fontSize: "0.92em",
     backgroundColor: "rgba(28, 25, 23, 0.03)",
   },
+  ".cm-md-table-widget": {
+    display: "inline-table",
+    width: "100%",
+    borderCollapse: "collapse",
+    margin: "0.45em 0",
+    fontSize: "0.95em",
+    verticalAlign: "top",
+  },
+  ".cm-md-table-widget th, .cm-md-table-widget td": {
+    border: "1px solid #e7e5e4",
+    padding: "6px 10px",
+    verticalAlign: "top",
+  },
+  ".cm-md-table-widget th": {
+    backgroundColor: "rgba(28, 25, 23, 0.04)",
+    fontWeight: "650",
+  },
+  ".cm-md-table-widget th:focus, .cm-md-table-widget td:focus": {
+    outline: "1px solid rgba(154, 52, 18, 0.45)",
+    backgroundColor: "rgba(154, 52, 18, 0.06)",
+  },
   ".cm-md-hr-widget": {
+    display: "block",
     border: "none",
     borderTop: "1px solid #d6d3d1",
-    margin: "0.8em 0",
+    margin: "0.9em 0",
+  },
+  ".cm-md-sink": {
+    display: "block",
+    height: "0",
+    minHeight: "0",
+    overflow: "hidden",
+    lineHeight: "0",
+    fontSize: "0",
+    padding: "0",
+    margin: "0",
+  },
+  ".cm-md-sink .cm-widgetBuffer, .cm-md-sink .cm-md-collapse": {
+    display: "none",
+  },
+  ".cm-lineNumbers .cm-gutterElement": {
+    overflow: "hidden",
+  },
+  ".cm-md-collapse": {
+    display: "inline-block",
+    width: "0",
+    height: "0",
+    overflow: "hidden",
+  },
+  ".cm-md-bullet, .cm-md-ol": {
+    color: "#9a3412",
+    fontWeight: "700",
+  },
+  ".cm-md-ol": { fontVariantNumeric: "tabular-nums" },
+  ".cm-md-fence": {
+    color: "#a8a29e",
+    fontFamily: 'Consolas, "Courier New", monospace',
+    fontSize: "12px",
   },
   ".cm-task-checkbox": {
     width: "14px",
@@ -395,5 +854,5 @@ export const livePreviewTheme = EditorView.baseTheme({
     verticalAlign: "middle",
     cursor: "pointer",
   },
-  ".cm-md-dim": { opacity: 0.28 },
+  ".cm-md-dim": { opacity: "0.28" },
 });

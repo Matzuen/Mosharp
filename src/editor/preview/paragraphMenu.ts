@@ -8,7 +8,9 @@ import {
 import {
   insertFence,
   insertHeading,
+  insertHr,
   insertQuote,
+  insertTable,
   toggleTask,
 } from "./formatCommands";
 import { sourceModeField } from "./modes";
@@ -56,6 +58,8 @@ function openParagraphMenu(view: EditorView, lineFrom: number, event: MouseEvent
     { label: "任务列表", run: () => toggleTask(view) },
     { label: "引用", run: () => insertQuote(view) },
     { label: "代码块", run: () => insertFence(view) },
+    { label: "分隔线", run: () => insertHr(view) },
+    { label: "表格", run: () => insertTable(view) },
   ];
   for (const action of actions) {
     const btn = document.createElement("button");

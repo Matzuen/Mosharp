@@ -114,6 +114,36 @@ export function insertFence(view: EditorView) {
   return true;
 }
 
+export function insertBullet(view: EditorView) {
+  const line = view.state.doc.lineAt(view.state.selection.main.head);
+  if (/^\s*([-*+]|\d+\.)\s+/.test(line.text)) return true;
+  view.dispatch({
+    changes: { from: line.from, insert: "- " },
+    selection: EditorSelection.cursor(line.from + 2),
+  });
+  return true;
+}
+
+export function insertHr(view: EditorView) {
+  const line = view.state.doc.lineAt(view.state.selection.main.head);
+  const insert = line.text.trim() ? "\n---\n" : "---\n";
+  view.dispatch({
+    changes: { from: line.to, insert },
+    selection: EditorSelection.cursor(line.to + insert.length),
+  });
+  return true;
+}
+
+export function insertTable(view: EditorView) {
+  const line = view.state.doc.lineAt(view.state.selection.main.head);
+  const insert = "\n| 列 1 | 列 2 |\n| --- | --- |\n|  |  |\n";
+  view.dispatch({
+    changes: { from: line.to, insert },
+    selection: EditorSelection.cursor(line.to + insert.indexOf("列")),
+  });
+  return true;
+}
+
 export function insertQuote(view: EditorView) {
   const line = view.state.doc.lineAt(view.state.selection.main.head);
   if (/^>\s?/.test(line.text)) {

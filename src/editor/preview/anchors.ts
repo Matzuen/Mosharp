@@ -1,5 +1,4 @@
-import { syntaxTree } from "@codemirror/language";
-import { EditorView } from "@codemirror/view";
+import type { Text } from "@codemirror/state";
 
 export function slugify(text: string): string {
   return text
@@ -9,42 +8,33 @@ export function slugify(text: string): string {
     .replace(/\s+/g, "-");
 }
 
-export function findHeadingAtSlug(view: EditorView, slug: string): number | null {
-  const target = decodeURIComponent(slug).toLowerCase();
-  const seen = new Map<string, number>();
-  let found: number | null = null;
-  syntaxTree(view.state).iterate({
-    enter(node) {
-      if (!/^ATXHeading\d$/.test(node.name) && !/^SetextHeading\d$/.test(node.name)) return;
-      const line = view.state.doc.lineAt(node.from);
-      const text = line.text.replace(/^#{1,6}\s+/, "").replace(/\s*=+\s*$/, "").replace(/\s*-+\s*$/, "").trim();
-      const base = slugify(text);
-      const count = seen.get(base) ?? 0;
-      seen.set(base, count + 1);
-      const full = count === 0 ? base : `${base}-${count}`;
-      if (full === target || base === target) found = line.number;
-    },
-  });
-  return found;
+function headingText(line: string): { level: number; text: string } | null {
+  const atx = /^(#{1,6})\s+(.*?)\s*#*\s*$/.exec(line);
+  if (atx) return { level: atx[1].length, text: atx[2].trim() };
+  return null;
 }
 
-export function listHeadingAnchors(view: EditorView): Array<{ line: number; level: number; text: string; slug: string }> {
+/** Walk the buffer so anchors work for headings that are not in the parsed viewport. */
+export function findHeadingLine(doc: Text, slug: string): number | null {
+  const target = decodeURIComponent(slug).trim().toLowerCase();
+  if (!target) return null;
   const seen = new Map<string, number>();
-  const out: Array<{ line: number; level: number; text: string; slug: string }> = [];
-  syntaxTree(view.state).iterate({
-    enter(node) {
-      const atx = /^ATXHeading(\d)$/.exec(node.name);
-      const setext = /^SetextHeading(\d)$/.exec(node.name);
-      const level = atx ? Number(atx[1]) : setext ? Number(setext[1]) : 0;
-      if (!level) return;
-      const line = view.state.doc.lineAt(node.from);
-      const text = line.text.replace(/^#{1,6}\s+/, "").replace(/\s*=+\s*$/, "").replace(/\s*-+\s*$/, "").trim();
-      const base = slugify(text);
-      const count = seen.get(base) ?? 0;
-      seen.set(base, count + 1);
-      const slug = count === 0 ? base : `${base}-${count}`;
-      out.push({ line: line.number, level, text, slug });
-    },
-  });
-  return out;
+  let inFence = false;
+
+  for (let n = 1; n <= doc.lines; n += 1) {
+    const text = doc.line(n).text;
+    if (/^(`{3,}|~{3,})/.test(text)) {
+      inFence = !inFence;
+      continue;
+    }
+    if (inFence) continue;
+    const heading = headingText(text);
+    if (!heading || !heading.text) continue;
+    const base = slugify(heading.text);
+    const count = seen.get(base) ?? 0;
+    seen.set(base, count + 1);
+    const full = count === 0 ? base : `${base}-${count}`;
+    if (full === target || base === target || heading.text.toLowerCase() === target) return n;
+  }
+  return null;
 }
