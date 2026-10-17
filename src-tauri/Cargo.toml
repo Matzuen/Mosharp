@@ -1,6 +1,6 @@
 [package]
 name = "mosharp"
-version = "1.1.0"
+version = "1.2.0"
 description = "Mosharp markdown editor"
 authors = ["俊文"]
 edition = "2021"
