@@ -25,6 +25,7 @@ import {
 } from "../writing";
 import { flashEffect } from "./flash";
 import { imageDisplaySrc, ImageWidget } from "./images";
+import { mathRegions } from "./math";
 import { sourceModeField } from "./modes";
 
 const INDEX_LIMIT = 4000;
@@ -178,6 +179,14 @@ function buildDecorations(view: EditorView): DecorationSet {
   for (const visible of view.visibleRanges) {
     const start = doc.lineAt(visible.from).number;
     const endLine = doc.lineAt(Math.min(visible.to, doc.length)).number;
+    // Raw TeX must stay literal, otherwise `a^2` turns into a superscript while
+    // the user is editing the `$$` block and the source no longer matches.
+    const lines: Array<{ from: number; text: string }> = [];
+    for (let n = start; n <= endLine; n += 1) {
+      const line = doc.line(n);
+      lines.push({ from: line.from, text: line.text });
+    }
+    const math = mathRegions(lines);
     for (let n = start; n <= endLine; n += 1) {
       const line = doc.line(n);
       if (isDefinitionLine(line.text)) {
@@ -188,7 +197,10 @@ function buildDecorations(view: EditorView): DecorationSet {
       const spans = scanLine(line.text);
       for (const span of spans) {
         const host = blocked(view, Math.min(line.from + span.from + 1, line.to));
-        addSpan(view, line.from, span, host, options, index, ranges);
+        const from = line.from + span.from;
+        const to = line.from + span.to;
+        const inMath = math.some((range) => from >= range.from && to <= range.to);
+        addSpan(view, line.from, span, host, options, index, ranges, inMath);
       }
       if (words.length > 0) addCustomWords(line.text, line.from, words, ranges);
     }
@@ -204,8 +216,11 @@ function addSpan(
   options: WritingOptions,
   index: WritingIndex,
   ranges: Range<Decoration>[],
+  inMath: boolean,
 ) {
   if (host === "InlineCode") return;
+  // No inline decoration inside maths: the TeX has to read as written.
+  if (inMath) return;
   const from = lineFrom + span.from;
   const to = lineFrom + span.to;
   const revealed = cursorInside(view, from, to);

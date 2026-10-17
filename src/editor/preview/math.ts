@@ -145,8 +145,63 @@ function hideMath(build: MathBuild, from: number, to: number, tex: string, displ
   build.covered.push({ from, to });
 }
 
-function maskCode(line: string): boolean[] {
-  const mask = Array<boolean>(line.length).fill(false);
+/**
+ * Document ranges that hold raw TeX.
+ *
+ * Inline markup inside maths must stay literal: while a `$$` block is being
+ * edited, `a^2` would otherwise turn into a superscript and `_x` into italics,
+ * so the source on screen would not match the file.
+ */
+export function mathRegions(lines: Array<{ from: number; text: string }>): Array<{
+  from: number;
+  to: number;
+}> {
+  const out: Array<{ from: number; to: number }> = [];
+  let blockFrom = -1;
+  for (const line of lines) {
+    if (/^\s*\$\$\s*$/.test(line.text)) {
+      if (blockFrom < 0) {
+        blockFrom = line.from;
+      } else {
+        out.push({ from: blockFrom, to: line.from + line.text.length });
+        blockFrom = -1;
+      }
+      continue;
+    }
+    if (blockFrom >= 0) continue;
+
+    const mask = maskCode(line.text);
+    const single = /^ {0,3}\$\$(.+)\$\$\s*$/.exec(line.text);
+    if (single) {
+      out.push({ from: line.from, to: line.from + line.text.length });
+      continue;
+    }
+    let i = 0;
+    while (i < line.text.length) {
+      if (line.text[i] !== "$" || mask[i] || line.text[i + 1] === "$") {
+        i += 1;
+        continue;
+      }
+      const close = line.text.indexOf("$", i + 1);
+      if (close < 0 || line.text[close - 1] === "\\" || mask[close]) break;
+      out.push({ from: line.from + i, to: line.from + close + 1 });
+      i = close + 1;
+    }
+    if (pandocMath) {
+      for (const match of line.text.matchAll(/\\\((.+?)\\\)|\\\[(.+?)\\\]/g)) {
+        if (match.index == null || mask[match.index]) continue;
+        out.push({ from: line.from + match.index, to: line.from + match.index + match[0].length });
+      }
+    }
+  }
+  if (blockFrom >= 0) {
+    const last = lines[lines.length - 1];
+    out.push({ from: blockFrom, to: last ? last.from + last.text.length : blockFrom });
+  }
+  return out;
+}
+
+function maskCode(line: string): boolean[] {  const mask = Array<boolean>(line.length).fill(false);
   let i = 0;
   while (i < line.length) {
     if (line[i] !== "`") {

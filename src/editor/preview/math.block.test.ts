@@ -1,5 +1,5 @@
 import { EditorState } from "@codemirror/state";
-import { decorateMath } from "./math.ts";
+import { decorateMath, mathRegions } from "./math.ts";
 
 /**
  * `decorateMath` only reads `view.state`, so a bare state is enough to exercise
@@ -64,5 +64,28 @@ assert(probe("a $x^2$ b\n", 4).decos.length === 0, "inline math reveals under th
 
 // An unclosed block stays as source so the marks can be fixed.
 assert(probe("$$\na^2\n", 6).decos.length === 0, "unclosed block stays source");
+
+// Regions mark where inline markup must stay literal (no `^2` superscript).
+function lines(texts: string[]) {
+  let offset = 0;
+  return texts.map((text) => {
+    const from = offset;
+    offset += text.length + 1;
+    return { from, text };
+  });
+}
+
+const block = mathRegions(lines(["$$", "a^2+b^2=c^2", "$$"]));
+assert(block.length === 1, "a $$ block yields one region");
+assert(block[0].from === 0 && block[0].to === 17, `block covers the whole fence (${block[0].to})`);
+
+const inline = mathRegions(lines(["行内 $x^2$ 说明"]));
+assert(inline.length === 1, "inline math yields one region");
+assert(inline[0].from === 3 && inline[0].to === 8, `inline region covers $x^2$ (${inline[0].from}-${inline[0].to})`);
+
+assert(mathRegions(lines(["$$x^2$$"])).length === 1, "single-line display math is a region");
+assert(mathRegions(lines(["代码 `$x$` 不算"])).length === 0, "math inside code is not a region");
+assert(mathRegions(lines(["普通段落"])).length === 0, "prose has no math");
+assert(mathRegions(lines(["$$", "a^2"])).length === 1, "unclosed block still covers its lines");
 
 console.log("math block ok");
