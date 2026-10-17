@@ -352,14 +352,21 @@ export function articleCss(colors: ThemeColors, width: number): string {
 }`;
 }
 
-export function standaloneHtml(title: string, article: string, css: string): string {
+export function standaloneHtml(
+  title: string,
+  article: string,
+  css: string,
+  katexCss = "",
+): string {
+  // The stylesheet is inlined (with its fonts) so the file works offline; it is
+  // omitted entirely when the document has no math.
+  const math = katexCss ? `<style>${katexCss}</style>` : "";
   return `<!doctype html>
 <html lang="zh-CN">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>${escapeHtml(title)}</title>
-  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.18.9/dist/katex.min.css">
+  <title>${escapeHtml(title)}</title>${math ? `\n  ${math}` : ""}
   <style>${css}</style>
 </head>
 <body>

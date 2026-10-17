@@ -116,7 +116,11 @@ async function exportHtml(request: ExportRequest, colors: ThemeColors) {
   // would break: embed the bytes instead.
   await inlineImages(holder, request.docPath);
   const css = articleCss(colors, request.contentWidth);
-  const html = standaloneHtml(request.title, holder.innerHTML, css);
+  // Only pay for the ~340 KB embedded math fonts when the document has math.
+  const katexCss = /class="katex/.test(article.html)
+    ? (await import("./katexCss")).KATEX_CSS
+    : "";
+  const html = standaloneHtml(request.title, holder.innerHTML, css, katexCss);
   const name = fileStem(request.title) + ".html";
   if (request.desktop && isTauri()) {
     const path = await choosePath(request.labels.html, name, "html", "HTML");
