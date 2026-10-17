@@ -1,6 +1,6 @@
 {
   "name": "mosharp",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "高性能 Markdown 编辑器。第 1 期是虚拟化文本内核：打开、编辑、保存。",
   "type": "module",
   "scripts": {
