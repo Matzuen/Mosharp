@@ -424,7 +424,13 @@ function renderRow(
     // Mutable: it tracks the last committed value so "dirty" stays meaningful.
     let original = cells[i];
     cell.className = "cm-md-cell";
-    cell.textContent = original;
+    // A cell cannot hold a real newline, so a line break is stored as `<br>`.
+    const lines = original.split(/<br\s*\/?>/i);
+    cell.textContent = lines[0] ?? "";
+    for (const line of lines.slice(1)) {
+      cell.appendChild(document.createElement("br"));
+      cell.appendChild(document.createTextNode(line));
+    }
     cell.contentEditable = "true";
     cell.spellcheck = false;
     cell.style.textAlign = aligns[i] ?? "left";
@@ -433,10 +439,18 @@ function renderRow(
       onActivate(visualRow, i);
     });
     cell.addEventListener("focusin", () => onActivate(visualRow, i));
+    /** Read the cell back, turning DOM line breaks into `<br>`. */
+    const cellText = () => {
+      let text = "";
+      for (const node of Array.from(cell.childNodes)) {
+        text += node.nodeName === "BR" ? "<br>" : (node.textContent ?? "");
+      }
+      return text.replace(/\r?\n/g, " ").trim();
+    };
     const commit = () => {
       // Cell text is unescaped here; `joinCells` adds the `\|` escaping when the
       // row is written back, so a pipe survives a round trip.
-      const next = (cell.textContent ?? "").replace(/\n/g, " ").trim();
+      const next = cellText();
       if (next === original) return;
       original = next;
       onCommit(visualRow, i, next);
@@ -447,13 +461,19 @@ function renderRow(
         // Native undo only covers the in-cell edit. Once committed, the edit
         // lives in the document, so route undo/redo to the editor history —
         // otherwise the cell and the source silently diverge.
-        if ((cell.textContent ?? "") !== original) return;
+        if (cellText() !== original) return;
         event.preventDefault();
         if (event.shiftKey) redo(view);
         else undo(view);
         return;
       }
-      if (event.key === "Enter" && !event.shiftKey) {
+      if (event.key === "Enter" && event.shiftKey) {
+        // Shift+Enter inserts a line break inside the cell instead of committing.
+        event.preventDefault();
+        document.execCommand("insertLineBreak");
+        return;
+      }
+      if (event.key === "Enter") {
         event.preventDefault();
         commit();
         cell.blur();
