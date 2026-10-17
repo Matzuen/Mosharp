@@ -19,6 +19,8 @@ import { DiagramWidget } from "./diagramFence";
 import { diagramKind } from "./diagramKind";
 import { notify } from "./notify";
 import { insideStrictly } from "./cursorScope";
+import { frontMatterLines } from "./frontMatter";
+import { MAX_ENTRIES, TocScan, type TocEntry } from "./toc";
 import { focusModeField, sourceModeField } from "./modes";
 import { quoteDepth } from "./quoteDepth";
 import {
@@ -157,6 +159,87 @@ class CollapseWidget extends WidgetType {
 }
 
 const collapseWidget = new CollapseWidget();
+
+/** Folded YAML header: one chip instead of the whole block. */
+class FrontMatterWidget extends WidgetType {
+  constructor(
+    readonly rows: number,
+    readonly from: number,
+  ) {
+    super();
+  }
+
+  eq(other: FrontMatterWidget) {
+    return other.rows === this.rows && other.from === this.from;
+  }
+
+  toDOM(view: EditorView) {
+    const chip = document.createElement("span");
+    chip.className = "cm-md-frontmatter";
+    chip.textContent = `YAML · ${this.rows}`;
+    chip.title = "front matter（点击编辑）";
+    chip.addEventListener("mousedown", (event) => {
+      if (!(event instanceof MouseEvent) || event.button !== 0) return;
+      event.preventDefault();
+      event.stopPropagation();
+      // Land inside the opening fence so the block unfolds for editing.
+      const at = Math.min(this.from + 1, view.state.doc.length);
+      view.dispatch({ selection: { anchor: at } });
+      view.focus();
+    });
+    return chip;
+  }
+}
+
+/** `[TOC]` rendered as a clickable outline of the document's headings. */
+class TocWidget extends WidgetType {
+  constructor(readonly from: number) {
+    super();
+  }
+
+  eq(other: TocWidget) {
+    return other.from === this.from;
+  }
+
+  toDOM(view: EditorView) {
+    const box = document.createElement("div");
+    box.className = "cm-md-toc";
+    const scan = new TocScan();
+    const entries: TocEntry[] = [];
+    const doc = view.state.doc;
+    let lineNo = 0;
+    for (const text of doc.iterLines(1, doc.lines)) {
+      lineNo += 1;
+      const entry = scan.push(text, lineNo);
+      if (entry) entries.push(entry);
+      if (entries.length >= MAX_ENTRIES) break;
+    }
+    if (entries.length === 0) {
+      box.textContent = "目录：暂无标题";
+      return box;
+    }
+    for (const entry of entries) {
+      const item = document.createElement("button");
+      item.type = "button";
+      item.className = `cm-md-toc-item level-${entry.level}`;
+      item.style.paddingLeft = `${(entry.level - 1) * 14}px`;
+      item.textContent = entry.text;
+      item.addEventListener("mousedown", (event) => {
+        if (!(event instanceof MouseEvent) || event.button !== 0) return;
+        event.preventDefault();
+        event.stopPropagation();
+        const pos = view.state.doc.line(entry.line).from;
+        view.dispatch({
+          selection: { anchor: pos },
+          effects: EditorView.scrollIntoView(pos, { y: "start" }),
+        });
+        view.focus();
+      });
+      box.appendChild(item);
+    }
+    return box;
+  }
+}
 
 class TableWidget extends WidgetType {
   dom: HTMLElement | null = null;
@@ -1024,7 +1107,9 @@ function buildDecorations(view: EditorView): {
   for (const range of view.visibleRanges) {
     decorateRange(view, range.from, range.to, focusMode, activeBlock, build);
     decorateMath(view, range.from, range.to, build);
+    decorateToc(view, range.from, range.to, build);
   }
+  decorateFrontMatter(view, build);
 
   for (const [lineNo, classes] of build.lineClasses) {
     const line = view.state.doc.line(lineNo);
@@ -1040,6 +1125,54 @@ function buildDecorations(view: EditorView): {
   } catch (error) {
     console.error("live preview decorations skipped", error);
     return emptyPreview;
+  }
+}
+
+/** Fold a leading YAML block into a chip unless the caret is inside it. */
+function decorateFrontMatter(view: EditorView, build: PreviewBuild) {
+  const doc = view.state.doc;
+  const limit = Math.min(doc.lines, 101);
+  const lines: string[] = [];
+  for (let n = 1; n <= limit; n += 1) lines.push(doc.line(n).text);
+  const found = frontMatterLines(lines);
+  if (!found) return;
+  const open = doc.line(found.open);
+  const close = doc.line(found.close);
+  if (isCovered(build, open.from, close.to)) return;
+  if (rangeHasCursor(view, open.from, close.to)) return;
+
+  const head = Decoration.replace({
+    widget: new FrontMatterWidget(found.close - found.open - 1, open.from),
+  }).range(open.from, open.to);
+  build.decos.push(head);
+  build.atomic.push(head);
+  for (let n = found.open + 1; n <= found.close; n += 1) {
+    const line = doc.line(n);
+    const sink = Decoration.replace({ widget: collapseWidget }).range(line.from, line.to);
+    build.decos.push(sink);
+    build.atomic.push(sink);
+  }
+  build.covered.push({ from: open.from, to: close.to });
+  spanLabel(build, doc, found.open, found.close);
+}
+
+/** `[TOC]` becomes a clickable outline; the caret on the line keeps the source. */
+function decorateToc(view: EditorView, from: number, to: number, build: PreviewBuild) {
+  const doc = view.state.doc;
+  const first = doc.lineAt(from).number;
+  const last = doc.lineAt(Math.min(to, doc.length)).number;
+  for (let n = first; n <= last; n += 1) {
+    const line = doc.line(n);
+    if (line.text.trim().toLowerCase() !== "[toc]") continue;
+    if (isCovered(build, line.from, line.to)) continue;
+    if (rangeHasCursor(view, line.from, line.to)) continue;
+    const deco = Decoration.replace({ widget: new TocWidget(line.from) }).range(
+      line.from,
+      line.to,
+    );
+    build.decos.push(deco);
+    build.atomic.push(deco);
+    build.covered.push({ from: line.from, to: line.to });
   }
 }
 
@@ -1436,6 +1569,40 @@ export const livePreviewTheme = EditorView.baseTheme({
     fontSize: "0.95em",
   },
   ".cm-md-math-bubble-body .katex": { color: "inherit" },
+  // Folded YAML header
+  ".cm-md-frontmatter": {
+    display: "inline-flex",
+    alignItems: "center",
+    padding: "1px 8px",
+    borderRadius: "999px",
+    border: "1px solid var(--line)",
+    background: "var(--code-block)",
+    color: "var(--muted)",
+    fontSize: "11px",
+    cursor: "text",
+  },
+  // `[TOC]`
+  ".cm-md-toc": {
+    display: "block",
+    margin: "0.4em 0",
+    padding: "6px 8px",
+    border: "1px solid var(--line)",
+    borderRadius: "8px",
+    background: "var(--code-block)",
+  },
+  ".cm-md-toc-item": {
+    display: "block",
+    width: "100%",
+    border: "none",
+    borderRadius: "5px",
+    background: "transparent",
+    color: "var(--ink)",
+    textAlign: "left",
+    fontSize: "12px",
+    lineHeight: "1.9",
+    cursor: "pointer",
+  },
+  ".cm-md-toc-item:hover": { background: "var(--hover)" },
   ".cm-md-math .katex": { color: "inherit" },
   ".cm-md-math-block": {
     display: "block",
