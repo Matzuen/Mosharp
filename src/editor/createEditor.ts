@@ -16,7 +16,7 @@ import {
   syntaxTree,
 } from "@codemirror/language";
 import { highlightSelectionMatches, search, searchKeymap } from "@codemirror/search";
-import { Compartment, EditorState, Transaction, type Extension } from "@codemirror/state";
+import { Compartment, EditorState, Prec, Transaction, type Extension } from "@codemirror/state";
 import {
   drawSelection,
   EditorView,
@@ -35,7 +35,7 @@ import { linkClickHandler, linkModCursor } from "./preview/links";
 import { setActiveDocumentPath } from "./preview/docPath";
 import { pasteImageHandler } from "./preview/images";
 import { caretAfterLink, isOnlyUrl, linkMarkdown } from "./pasteLink";
-import { blockStarter } from "./autoBlock";
+import { blockStarter, fenceCloseText, fenceOpener } from "./autoBlock";
 import { setPandocMath } from "./preview/math";
 import {
   hiddenLineNumberField,
@@ -169,6 +169,29 @@ function pasteLinkHandler(event: ClipboardEvent, view: EditorView): boolean {
   return true;
 }
 
+/**
+ * Enter on a complete fence opener (` ```html `) drops in the closing fence.
+ * The language comes first, so the block never ends up as an empty "plain text"
+ * fence — and an opener that already has content below it is left alone.
+ */
+function closeFenceOnEnter(view: EditorView): boolean {
+  const range = view.state.selection.main;
+  if (!range.empty) return false;
+  const doc = view.state.doc;
+  const line = doc.lineAt(range.head);
+  if (range.head !== line.to) return false;
+  const opener = fenceOpener(line.text);
+  if (!opener) return false;
+  const next = line.number < doc.lines ? doc.line(line.number + 1).text : "";
+  if (next.trim().length > 0) return false;
+  view.dispatch({
+    changes: { from: range.head, insert: fenceCloseText(opener.fence) },
+    selection: { anchor: range.head + 1 },
+    userEvent: "input.newline",
+  });
+  return true;
+}
+
 function buildExtensions(
   hooks: {
     onEdit: () => void;
@@ -208,6 +231,7 @@ function buildExtensions(
     syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
     search({ top: true }),
     highlightSelectionMatches({ wholeWords: false }),
+    Prec.high(keymap.of([{ key: "Enter", run: closeFenceOnEnter }])),
     keyCompartment.of(keymap.of(formatKeymapFrom(DEFAULT_SHORTCUTS))),
     keymap.of([
       indentWithTab,
@@ -264,18 +288,9 @@ function buildExtensions(
       const after = view.state.sliceDoc(from, line.to);
       const starter = blockStarter(before, after, text);
       if (!starter) return false;
-      // A fence glued to the line above is swallowed by that paragraph or HTML
-      // block, so make sure there is a blank line in front of it.
-      const previous = line.number > 1 ? view.state.doc.line(line.number - 1).text : "";
-      const prepend = starter.fence && previous.trim().length > 0;
       view.dispatch({
-        changes: prepend
-          ? [
-              { from: line.from, insert: "\n" },
-              { from, to, insert: starter.insert },
-            ]
-          : { from, to, insert: starter.insert },
-        selection: { anchor: from + starter.caret + (prepend ? 1 : 0) },
+        changes: { from, to, insert: starter.insert },
+        selection: { anchor: from + starter.caret },
         userEvent: "input.type",
       });
       return true;
