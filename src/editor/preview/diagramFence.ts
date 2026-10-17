@@ -110,13 +110,18 @@ export class DiagramWidget extends WidgetType {
     readonly source: string,
     /** Rendered under the source while the fence is being edited. */
     readonly preview = false,
+    /** Where a click on a preview puts the caret (start of the fence body). */
+    readonly caretAt = -1,
   ) {
     super();
   }
 
   eq(other: DiagramWidget) {
     return (
-      this.kind === other.kind && this.source === other.source && this.preview === other.preview
+      this.kind === other.kind &&
+      this.source === other.source &&
+      this.preview === other.preview &&
+      this.caretAt === other.caretAt
     );
   }
 
@@ -136,6 +141,13 @@ export class DiagramWidget extends WidgetType {
     el.addEventListener("mousedown", (event) => {
       event.preventDefault();
       event.stopPropagation();
+      // The preview widget sits at the end of the closing fence, so `posAtDOM`
+      // would drop the caret *after* the block. Point it into the body instead.
+      if (this.preview && this.caretAt >= 0) {
+        view.dispatch({ selection: { anchor: Math.min(this.caretAt, view.state.doc.length) } });
+        view.focus();
+        return;
+      }
       const pos = view.posAtDOM(el);
       if (pos == null) return;
       const line = view.state.doc.lineAt(pos);

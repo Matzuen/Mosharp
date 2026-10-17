@@ -1029,7 +1029,7 @@ function decorateRange(
             // Inline widget: block widgets may not come from a view plugin.
             build.decos.push(
               Decoration.widget({
-                widget: new DiagramWidget(kind, source, true),
+                widget: new DiagramWidget(kind, source, true, bodyFrom),
                 side: 1,
               }).range(end.to),
             );
