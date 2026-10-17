@@ -56,6 +56,53 @@ pub fn reveal_in_folder(path: String) -> Result<(), String> {
     reveal_path(&target)
 }
 
+/// Create an empty document. The parent folder is created when missing, so the
+/// caller can offer "new file inside this folder" without extra round trips.
+#[tauri::command]
+pub fn create_document(path: String) -> Result<(), String> {
+    let target = PathBuf::from(&path);
+    if target.exists() {
+        return Err("同名文件已存在".to_string());
+    }
+    if let Some(parent) = target.parent() {
+        if !parent.as_os_str().is_empty() {
+            fs::create_dir_all(parent).map_err(|err| err.to_string())?;
+        }
+    }
+    fs::write(&target, "").map_err(|err| err.to_string())
+}
+
+/// Rename or move an entry. Refuses to overwrite an existing path.
+#[tauri::command]
+pub fn rename_entry(from: String, to: String) -> Result<(), String> {
+    let source = PathBuf::from(&from);
+    let target = PathBuf::from(&to);
+    if !source.exists() {
+        return Err("路径不存在".to_string());
+    }
+    if target.exists() {
+        return Err("目标已存在".to_string());
+    }
+    fs::rename(&source, &target).map_err(|err| err.to_string())
+}
+
+/// Delete a file, or a folder that is already empty. Directories are never
+/// removed recursively: the UI has no undo, so a stray click must not take a
+/// whole tree with it.
+#[tauri::command]
+pub fn delete_entry(path: String) -> Result<(), String> {
+    let target = PathBuf::from(&path);
+    let meta = fs::metadata(&target).map_err(|err| err.to_string())?;
+    if !meta.is_dir() {
+        return fs::remove_file(&target).map_err(|err| err.to_string());
+    }
+    let mut entries = fs::read_dir(&target).map_err(|err| err.to_string())?;
+    if entries.next().is_some() {
+        return Err("文件夹不为空".to_string());
+    }
+    fs::remove_dir(&target).map_err(|err| err.to_string())
+}
+
 pub fn is_markdown_name(name: &str) -> bool {
     let lower = name.to_ascii_lowercase();
     lower.ends_with(".md") || lower.ends_with(".markdown") || lower.ends_with(".txt")

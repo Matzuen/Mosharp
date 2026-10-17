@@ -63,6 +63,21 @@ export function listDirectory(path: string): Promise<DirEntryInfo[]> {
   return invoke("list_directory", { path });
 }
 
+/** Creates an empty document; the parent folder is created when missing. */
+export function createDocument(path: string): Promise<void> {
+  return invoke("create_document", { path });
+}
+
+/** Renames or moves an entry; refuses to overwrite an existing path. */
+export function renameEntry(from: string, to: string): Promise<void> {
+  return invoke("rename_entry", { from, to });
+}
+
+/** Deletes a file, or a folder that is already empty. */
+export function deleteEntry(path: string): Promise<void> {
+  return invoke("delete_entry", { path });
+}
+
 export function revealInFolder(path: string): Promise<void> {
   return invoke("reveal_in_folder", { path });
 }

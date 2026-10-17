@@ -885,6 +885,54 @@ textarea {
   font-size: 12px;
 }
 
+/* Search box plus the "new file" button share one row. */
+.side-search-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 8px 8px 0;
+}
+
+.side-search-row .side-search {
+  flex: 1;
+  min-width: 0;
+  width: auto;
+  margin: 0;
+}
+
+.side-new {
+  flex: none;
+  width: 28px;
+  height: 28px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--menu);
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 15px;
+  line-height: 1;
+}
+
+.side-new:hover {
+  color: var(--ink);
+  background: var(--hover);
+}
+
+/* Inline rename box that replaces a tree row. */
+.tree-rename {
+  width: 100%;
+  height: 26px;
+  margin: 1px 0;
+  padding: 0 8px;
+  border: 1px solid var(--accent);
+  border-radius: 5px;
+  background: var(--paper);
+  color: var(--ink);
+  font: inherit;
+  font-size: 12px;
+  outline: none;
+}
+
 .palette-backdrop,
 .settings-backdrop {
   position: fixed;

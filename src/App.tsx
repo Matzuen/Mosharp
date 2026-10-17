@@ -18,12 +18,15 @@ import {
 import { ackClosePrompt, resolveClose, setUnsaved } from "./api/close";
 import { placeImage } from "./api/images";
 import {
+  createDocument,
+  deleteEntry,
   listDirectory,
   normalizeEncoding,
   openFolderPath,
   openMarkdownPath,
   readDocument,
   recoveryFolder,
+  renameEntry,
   revealInFolder,
   saveMarkdownPath,
   saveRecoveryCopy,
@@ -131,6 +134,8 @@ interface MenuState {
   kind: "tab" | "file";
   tabId?: string;
   path?: string;
+  /** The right-clicked tree row is a folder. */
+  dir?: boolean;
 }
 
 interface TreeNode extends DirEntryInfo {
@@ -142,6 +147,18 @@ interface TreeNode extends DirEntryInfo {
 function documentName(path: string | null, untitled: string): string {
   if (!path) return untitled;
   return path.split(/[/\\]/).pop() ?? untitled;
+}
+
+/** Folder part of a path, keeping the original separators. */
+function parentPath(path: string): string {
+  const index = Math.max(path.lastIndexOf("/"), path.lastIndexOf("\\"));
+  return index < 0 ? "" : path.slice(0, index);
+}
+
+function joinPath(folder: string, name: string): string {
+  if (!folder) return name;
+  const separator = folder.includes("\\") ? "\\" : "/";
+  return `${folder.replace(/[\\/]+$/, "")}${separator}${name}`;
 }
 
 function fileTitle(path: string | null, dirty: boolean, untitled: string): string {
@@ -243,6 +260,9 @@ export default function App() {
   const [dropHover, setDropHover] = createSignal(false);
   const [fileQuery, setFileQuery] = createSignal("");
   const [outlineQuery, setOutlineQuery] = createSignal("");
+  /** Path being renamed inline in the file tree, and the text in the box. */
+  const [renaming, setRenaming] = createSignal<string | null>(null);
+  const [renameText, setRenameText] = createSignal("");
   const [searchHits, setSearchHits] = createSignal<WorkspaceSearch>({
     names: [],
     matches: [],
@@ -886,6 +906,76 @@ export default function App() {
         children: applyExpanded(withDepth, expanded, depth + 1),
       };
     });
+  }
+
+  /** Create an empty document in `folder` and immediately offer to name it. */
+  async function newFileIn(folder: string) {
+    if (!isTauri()) {
+      setNotice(t(locale(), "needDesktop"));
+      return;
+    }
+    try {
+      const entries = await listDirectory(folder || prefs().workspaceRoot || "");
+      let name = "未命名.md";
+      let counter = 2;
+      while (entries.some((entry) => entry.name.toLowerCase() === name.toLowerCase())) {
+        name = `未命名 ${counter}.md`;
+        counter += 1;
+      }
+      const target = joinPath(folder, name);
+      await createDocument(target);
+      await reloadTree();
+      setRenameText(name);
+      setRenaming(target);
+    } catch (error) {
+      setNotice(`Mosharp: ${errorText(error)}`);
+    }
+  }
+
+  async function commitRename() {
+    const from = renaming();
+    if (!from) return;
+    const typed = renameText().trim();
+    setRenaming(null);
+    if (!typed) return;
+    // A typed name without an extension keeps the original one.
+    const suffix = /\.[^.]+$/.exec(documentName(from, ""))?.[0] ?? "";
+    const name = /\.[^.]+$/.test(typed) ? typed : `${typed}${suffix}`;
+    const to = joinPath(parentPath(from), name);
+    if (to === from) return;
+    try {
+      await renameEntry(from, to);
+      setTabs((current) =>
+        current.map((tab) => (samePath(tab.path, from) ? { ...tab, path: to } : tab)),
+      );
+      if (samePath(activeTab()?.path, from)) {
+        editor?.setDocumentPath(to);
+        rememberRecent(to);
+        void syncTitle();
+      }
+      await reloadTree();
+      refreshWatches();
+    } catch (error) {
+      setNotice(`${t(locale(), "rename")}：${errorText(error)}`);
+    }
+  }
+
+  async function removeEntry(path: string) {
+    const tab = tabs().find((item) => samePath(item.path, path));
+    if (tab?.dirty) {
+      // Deleting the file under an unsaved buffer would lose the edits.
+      setNotice(t(locale(), "externalConflict"));
+      return;
+    }
+    if (!window.confirm(`${t(locale(), "remove")} ${documentName(path, "")}?`)) return;
+    try {
+      await deleteEntry(path);
+      if (tab) await closeTab(tab.id);
+      await reloadTree();
+      refreshWatches();
+    } catch (error) {
+      setNotice(`${t(locale(), "remove")}：${errorText(error)}`);
+    }
   }
 
   async function reloadTree(root = prefs().workspaceRoot) {
@@ -2297,20 +2387,30 @@ export default function App() {
               </button>
             </div>
             <Show when={prefs().panelMode === "files"}>
-              <input
-                class="side-search"
-                type="search"
-                ref={searchInput}
-                placeholder={t(locale(), "searchFiles")}
-                value={fileQuery()}
-                onInput={(event) => setFileQuery(event.currentTarget.value)}
-                onKeyDown={(event) => {
-                  if (event.key !== "Escape") return;
-                  event.preventDefault();
-                  if (fileQuery()) setFileQuery("");
-                  else event.currentTarget.blur();
-                }}
-              />
+              <div class="side-search-row">
+                <input
+                  class="side-search"
+                  type="search"
+                  ref={searchInput}
+                  placeholder={t(locale(), "searchFiles")}
+                  value={fileQuery()}
+                  onInput={(event) => setFileQuery(event.currentTarget.value)}
+                  onKeyDown={(event) => {
+                    if (event.key !== "Escape") return;
+                    event.preventDefault();
+                    if (fileQuery()) setFileQuery("");
+                    else event.currentTarget.blur();
+                  }}
+                />
+                <button
+                  type="button"
+                  class="side-new"
+                  title={t(locale(), "newFileHere")}
+                  onClick={() => void newFileIn(prefs().workspaceRoot ?? "")}
+                >
+                  +
+                </button>
+              </div>
             </Show>
             <Show when={prefs().panelMode === "outline"}>
               <input
@@ -2437,35 +2537,68 @@ export default function App() {
                   <Show when={!fileQuery().trim()}>
                     <For each={visibleFiles()}>
                       {(node) => (
-                        <button
-                          type="button"
-                          role="treeitem"
-                          aria-expanded={node.is_dir ? node.expanded : undefined}
-                          class={`tree-item${node.is_dir ? " dir" : ""}${
-                            samePath(node.path, activeTab()?.path) ? " current" : ""
-                          }`}
-                          style={{ "padding-left": `${10 + node.depth * 14}px` }}
-                          title={node.path}
-                          onClick={() => {
-                            if (node.is_dir) void toggleDir(node);
-                            else void openPathInTab(node.path);
-                          }}
-                          onContextMenu={(event) => {
-                            event.preventDefault();
-                            event.stopPropagation();
-                            setMenu({
-                              x: event.clientX,
-                              y: event.clientY,
-                              kind: "file",
-                              path: node.path,
-                            });
-                          }}
+                        <Show
+                          when={renaming() === node.path}
+                          fallback={
+                            <button
+                              type="button"
+                              role="treeitem"
+                              aria-expanded={node.is_dir ? node.expanded : undefined}
+                              class={`tree-item${node.is_dir ? " dir" : ""}${
+                                samePath(node.path, activeTab()?.path) ? " current" : ""
+                              }`}
+                              style={{ "padding-left": `${10 + node.depth * 14}px` }}
+                              title={node.path}
+                              onClick={() => {
+                                if (node.is_dir) void toggleDir(node);
+                                else void openPathInTab(node.path);
+                              }}
+                              onContextMenu={(event) => {
+                                event.preventDefault();
+                                event.stopPropagation();
+                                setMenu({
+                                  x: event.clientX,
+                                  y: event.clientY,
+                                  kind: "file",
+                                  path: node.path,
+                                  dir: node.is_dir,
+                                });
+                              }}
+                            >
+                              <span class="tree-twist">
+                                {node.is_dir ? (node.expanded ? "▾" : "▸") : "·"}
+                              </span>
+                              <span class="tree-name">{node.name}</span>
+                            </button>
+                          }
                         >
-                          <span class="tree-twist">
-                            {node.is_dir ? (node.expanded ? "▾" : "▸") : "·"}
-                          </span>
-                          <span class="tree-name">{node.name}</span>
-                        </button>
+                          <input
+                            class="tree-rename"
+                            value={renameText()}
+                            ref={(element) => {
+                              // Focus after the row exists, and preselect the
+                              // name so typing replaces it.
+                              queueMicrotask(() => {
+                                element.focus();
+                                const dot = element.value.lastIndexOf(".");
+                                element.setSelectionRange(0, dot > 0 ? dot : element.value.length);
+                              });
+                            }}
+                            onInput={(event) => setRenameText(event.currentTarget.value)}
+                            onKeyDown={(event) => {
+                              if (event.key === "Enter") {
+                                event.preventDefault();
+                                void commitRename();
+                              } else if (event.key === "Escape") {
+                                event.preventDefault();
+                                setRenaming(null);
+                              }
+                            }}
+                            onBlur={() => {
+                              if (renaming() === node.path) setRenaming(null);
+                            }}
+                          />
+                        </Show>
                       )}
                     </For>
                   </Show>
@@ -2560,6 +2693,40 @@ export default function App() {
                 }}
               >
                 {t(locale(), "closeRight")}
+              </button>
+            </Show>
+            <Show when={state().kind === "file" && state().path}>
+              <button
+                type="button"
+                onClick={() => {
+                  const path = state().path!;
+                  const folder = state().dir ? path : parentPath(path);
+                  closeMenu();
+                  void newFileIn(folder);
+                }}
+              >
+                {t(locale(), "newFileHere")}
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const path = state().path!;
+                  closeMenu();
+                  setRenameText(documentName(path, ""));
+                  setRenaming(path);
+                }}
+              >
+                {t(locale(), "rename")}
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const path = state().path!;
+                  closeMenu();
+                  void removeEntry(path);
+                }}
+              >
+                {t(locale(), "remove")}
               </button>
             </Show>
             <button
