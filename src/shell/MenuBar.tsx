@@ -133,7 +133,11 @@ export function MenuBar(props: { menus: () => MenuDef[] }) {
               <AccessKey access={menu.access} />
             </button>
             <Show when={open() === menu.id}>
-              <div class="menu-drop">
+              <div
+                class={`menu-drop${
+                  menu.items.some((item) => item.children) ? "" : " is-scrollable"
+                }`}
+              >
                 <MenuItems items={menu.items} onDone={() => setOpen(null)} />
               </div>
             </Show>

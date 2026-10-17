@@ -397,8 +397,18 @@ textarea {
 .menu-drop {
   top: calc(100% + 2px);
   left: 0;
+}
+
+/*
+ * Only flat menus may scroll. `overflow` clips every descendant, including the
+ * absolutely positioned flyouts (最近打开 / 导出), which used to make both a
+ * horizontal and a vertical scrollbar appear and hid the submenu entirely.
+ * Menus that own a flyout are short enough to skip the cap.
+ */
+.menu-drop.is-scrollable {
   max-height: min(70vh, calc(100vh - 80px));
-  overflow: auto;
+  overflow-y: auto;
+  overflow-x: hidden;
 }
 
 .menu-flyout {
