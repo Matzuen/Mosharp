@@ -35,7 +35,7 @@ import { linkClickHandler, linkModCursor } from "./preview/links";
 import { setActiveDocumentPath } from "./preview/docPath";
 import { pasteImageHandler } from "./preview/images";
 import { caretAfterLink, isOnlyUrl, linkMarkdown } from "./pasteLink";
-import { blockStarter, fenceCloseText, fenceOpener } from "./autoBlock";
+import { blockStarter, emptyFenceRange, fenceCloseText, fenceOpener } from "./autoBlock";
 import { setPandocMath } from "./preview/math";
 import {
   hiddenLineNumberField,
@@ -193,6 +193,34 @@ function closeFenceOnEnter(view: EditorView): boolean {
   return true;
 }
 
+/**
+ * Backspace on an empty fence body removes the whole block. Without this, the
+ * fence created by the Enter shortcut can only be deleted one character at a
+ * time, leaving a stray empty code block behind.
+ */
+function deleteEmptyFence(view: EditorView): boolean {
+  const range = view.state.selection.main;
+  if (!range.empty) return false;
+  const doc = view.state.doc;
+  const line = doc.lineAt(range.head);
+  if (line.text.trim().length > 0) return false;
+  const first = Math.max(1, line.number - 8);
+  const last = Math.min(doc.lines, line.number + 8);
+  const lines = [];
+  for (let n = first; n <= last; n += 1) {
+    const current = doc.line(n);
+    lines.push({ from: current.from, to: current.to, text: current.text });
+  }
+  const found = emptyFenceRange(lines, line.number - first);
+  if (!found) return false;
+  view.dispatch({
+    changes: { from: found.from, to: found.to, insert: "" },
+    selection: { anchor: found.from },
+    userEvent: "delete.backward",
+  });
+  return true;
+}
+
 function buildExtensions(
   hooks: {
     onEdit: () => void;
@@ -233,6 +261,7 @@ function buildExtensions(
     search({ top: true }),
     highlightSelectionMatches({ wholeWords: false }),
     Prec.high(keymap.of([{ key: "Enter", run: closeFenceOnEnter }])),
+    Prec.high(keymap.of([{ key: "Backspace", run: deleteEmptyFence }])),
     keyCompartment.of(keymap.of(formatKeymapFrom(DEFAULT_SHORTCUTS))),
     keymap.of([
       indentWithTab,

@@ -41,3 +41,36 @@ export function fenceCloseText(fence: string): string {
   // Blank line for the body, then the matching closing fence.
   return `\n\n${fence}`;
 }
+
+export interface LineSlice {
+  from: number;
+  to: number;
+  text: string;
+}
+
+/**
+ * Range to delete when Backspace is pressed on an empty fence body.
+ *
+ * A fence created by the Enter shortcut starts with an empty body; deleting one
+ * character at a time leaves a stray empty code block, so the whole block is
+ * removed at once. Returns null when the caret is not inside an empty fence.
+ */
+export function emptyFenceRange(
+  lines: LineSlice[],
+  index: number,
+): { from: number; to: number } | null {
+  if (index < 0 || index >= lines.length) return null;
+  if (lines[index].text.trim().length > 0) return null;
+
+  // Blank lines above and below still belong to the block.
+  let open = index;
+  while (open > 0 && lines[open].text.trim().length === 0) open -= 1;
+  let close = index;
+  while (close < lines.length - 1 && lines[close].text.trim().length === 0) close += 1;
+
+  const opener = fenceOpener(lines[open].text);
+  if (!opener) return null;
+  if (lines[close].text.trim() !== opener.fence) return null;
+  if (close <= open + 1) return null;
+  return { from: lines[open].from, to: lines[close].to };
+}

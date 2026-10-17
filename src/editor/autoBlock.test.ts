@@ -1,4 +1,4 @@
-import { blockStarter, fenceCloseText, fenceOpener } from "./autoBlock.ts";
+import { blockStarter, emptyFenceRange, fenceCloseText, fenceOpener } from "./autoBlock.ts";
 
 function assert(condition: boolean, message: string): void {
   if (!condition) throw new Error(message);
@@ -29,5 +29,31 @@ assert(fenceOpener("text ```js") === null, "not at the start of the line");
 
 assert(fenceCloseText("```") === "\n\n```", "Enter leaves a blank body line then closes");
 assert(fenceCloseText("~~~") === "\n\n~~~", "the closing fence matches the opener");
+
+// Backspace inside an empty fence removes the whole block.
+function slice(texts: string[]): { from: number; to: number; text: string }[] {
+  let offset = 0;
+  return texts.map((text) => {
+    const from = offset;
+    offset += text.length + 1;
+    return { from, to: from + text.length, text };
+  });
+}
+
+const emptyBlock = slice(["```js", "", "```"]);
+const range = emptyFenceRange(emptyBlock, 1);
+assert(range?.from === 0, "deletion starts at the opener");
+assert(range?.to === emptyBlock[2].to, "deletion ends at the closing fence");
+
+// Several blank body lines are still one block.
+const twoBlanks = slice(["```js", "", "", "```"]);
+assert(emptyFenceRange(twoBlanks, 2)?.to === twoBlanks[3].to, "blank lines are included");
+
+// Content means normal Backspace.
+const withCode = slice(["```js", "const x = 1", "```"]);
+assert(emptyFenceRange(withCode, 1) === null, "a block with code is left alone");
+assert(emptyFenceRange(slice(["text", "", "text"]), 1) === null, "ordinary blank lines are not a fence");
+assert(emptyFenceRange(slice(["```js", "", "```"]), 0) === null, "not on a fence line itself");
+assert(emptyFenceRange(slice(["~~~", "", "```"]), 1) === null, "mismatched fences do not count");
 
 console.log("autoBlock ok");
