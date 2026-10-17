@@ -200,6 +200,96 @@ class HtmlBlockWidget extends WidgetType {
   }
 }
 
+/** Plain fallback rendering for a fence swallowed by an HTML block. */
+class CodeBlockWidget extends WidgetType {
+  constructor(
+    readonly source: string,
+    readonly info: string,
+  ) {
+    super();
+  }
+
+  eq(other: CodeBlockWidget) {
+    return other.source === this.source && other.info === this.info;
+  }
+
+  toDOM() {
+    const pre = document.createElement("pre");
+    pre.className = "cm-md-code-fallback";
+    const code = document.createElement("code");
+    code.textContent = this.source;
+    pre.appendChild(code);
+    return pre;
+  }
+}
+
+/**
+ * `@lezer/markdown` follows CommonMark here: a block-level HTML tag opens an
+ * HTML block that runs until a blank line, so
+ *
+ *     <div>x</div>
+ *     ```mermaid
+ *     ...
+ *     ```
+ *
+ * parses as a single HTML block and the fence never becomes a fence. Recover the
+ * fences inside such a block so a missing blank line does not silently disable
+ * rendering for everything below it.
+ */
+function recoverFencesInHtmlBlock(
+  view: EditorView,
+  build: PreviewBuild,
+  start: { number: number; from: number },
+  end: { number: number; to: number },
+): boolean {
+  const doc = view.state.doc;
+  let recovered = false;
+  for (let n = start.number; n <= end.number; n += 1) {
+    const open = /^ {0,3}(`{3,}|~{3,})[ \t]*([^\s`]*)/.exec(doc.line(n).text);
+    if (!open) continue;
+    const fence = open[1];
+    const info = (open[2] ?? "").trim();
+    let close = -1;
+    for (let k = n + 1; k <= end.number; k += 1) {
+      const text = doc.line(k).text.trim();
+      if (text.length >= fence.length && text.startsWith(fence[0].repeat(fence.length))) {
+        close = k;
+        break;
+      }
+    }
+    if (close < 0) break;
+
+    const opener = doc.line(n);
+    const closer = doc.line(close);
+    const source = doc
+      .sliceString(doc.line(n + 1).from, closer.from)
+      .replace(/\n$/, "");
+    const kind = diagramKind(info);
+    const lower = info.toLowerCase();
+    const widget: WidgetType = kind
+      ? new DiagramWidget(kind, source)
+      : lower === "html" || lower === "htm"
+        ? new HtmlBlockWidget(source, opener.from + 1)
+        : new CodeBlockWidget(source, info);
+
+    const deco = Decoration.replace({ widget }).range(opener.from, opener.to);
+    build.decos.push(deco);
+    build.atomic.push(deco);
+    for (let k = n + 1; k <= close; k += 1) {
+      const line = doc.line(k);
+      const sink = Decoration.replace({ widget: collapseWidget }).range(line.from, line.to);
+      build.decos.push(sink);
+      build.atomic.push(sink);
+      addLineClass(build, k, "cm-md-sink");
+      build.hidden.push(line.from);
+    }
+    build.covered.push({ from: opener.from, to: closer.to });
+    recovered = true;
+    n = close;
+  }
+  return recovered;
+}
+
 /** Folded YAML header: one chip instead of the whole block. */class FrontMatterWidget extends WidgetType {
   constructor(
     readonly rows: number,
@@ -987,6 +1077,17 @@ function decorateRange(
         return false;
       }
 
+      if (name === "HTMLBlock") {
+        // A missing blank line makes the HTML block swallow the fences below it;
+        // render whatever can be recovered instead of leaving raw text.
+        const doc = view.state.doc;
+        const startLine = doc.lineAt(node.from);
+        const endLine = doc.lineAt(Math.min(node.to, doc.length));
+        if (recoverFencesInHtmlBlock(view, build, startLine, endLine)) {
+          addLineClass(build, startLine.number, "cm-md-html-source");
+        }
+      }
+
       if (name === "HorizontalRule") {
         const line = view.state.doc.lineAt(node.from);
         if (!lineHasCursor(view, line.number)) {
@@ -1691,6 +1792,18 @@ export const livePreviewTheme = EditorView.baseTheme({
   ".cm-md-html-block": {
     display: "block",
     margin: "0.2em 0",
+  },
+  // Fence recovered from inside an HTML block (missing blank line): plain code
+  // styling, since the normal highlighted path cannot be reused there.
+  ".cm-md-code-fallback": {
+    margin: "0.2em 0",
+    padding: "8px 10px",
+    borderRadius: "6px",
+    background: "var(--code-block)",
+    fontFamily: 'Consolas, "Courier New", monospace',
+    fontSize: "0.92em",
+    whiteSpace: "pre-wrap",
+    overflowX: "auto",
   },
   // `[TOC]`
   ".cm-md-toc": {

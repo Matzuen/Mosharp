@@ -10,6 +10,11 @@ export interface BlockStarter {
   insert: string;
   /** Caret offset relative to the insertion point. */
   caret: number;
+  /**
+   * Fences must be preceded by a blank line: without one, an HTML block or a
+   * paragraph above swallows them and nothing below renders.
+   */
+  fence: boolean;
 }
 
 /**
@@ -19,8 +24,8 @@ export interface BlockStarter {
 export function blockStarter(before: string, after: string, text: string): BlockStarter | null {
   // Never hijack typing in the middle of existing line content.
   if (after.trim().length > 0) return null;
-  if (text === "$" && before === "$") return { insert: "$\n\n$$", caret: 3 };
-  if (text === "`" && before === "``") return { insert: "`\n\n```", caret: 3 };
-  if (text === "~" && before === "~~") return { insert: "~\n\n~~~", caret: 3 };
+  if (text === "$" && before === "$") return { insert: "$\n\n$$", caret: 3, fence: false };
+  if (text === "`" && before === "``") return { insert: "`\n\n```", caret: 3, fence: true };
+  if (text === "~" && before === "~~") return { insert: "~\n\n~~~", caret: 3, fence: true };
   return null;
 }

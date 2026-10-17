@@ -264,9 +264,18 @@ function buildExtensions(
       const after = view.state.sliceDoc(from, line.to);
       const starter = blockStarter(before, after, text);
       if (!starter) return false;
+      // A fence glued to the line above is swallowed by that paragraph or HTML
+      // block, so make sure there is a blank line in front of it.
+      const previous = line.number > 1 ? view.state.doc.line(line.number - 1).text : "";
+      const prepend = starter.fence && previous.trim().length > 0;
       view.dispatch({
-        changes: { from, to, insert: starter.insert },
-        selection: { anchor: from + starter.caret },
+        changes: prepend
+          ? [
+              { from: line.from, insert: "\n" },
+              { from, to, insert: starter.insert },
+            ]
+          : { from, to, insert: starter.insert },
+        selection: { anchor: from + starter.caret + (prepend ? 1 : 0) },
         userEvent: "input.type",
       });
       return true;
