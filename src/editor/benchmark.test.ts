@@ -8,6 +8,9 @@ const text = generateBenchmark(100_000);
 const lines = text.split("\n");
 assert(lines.length === 100_000, `line count ${lines.length}`);
 assert(lines[0] === "---" && lines[1] === "title: 10 万行基准" && lines[2] === "---", "frontmatter");
+// The table of contents is generated once, right after the metadata, so the
+// outline/TOC path is exercised without scanning the document a thousand times.
+assert(lines[4] === "[TOC]", `toc placeholder at line 5: ${lines[4]}`);
 
 const markers = [
   "# 第 1 节",
@@ -26,6 +29,7 @@ const markers = [
   "\n---\n",
   "\n***\n",
   "| 左 | 中 | 右 |",
+  "| 多行<br>单元格 1",
   "```ts",
   "$E=mc^2$",
   "\\(a+b\\)",

@@ -1,5 +1,5 @@
 import type { Text } from "@codemirror/state";
-import { TocScan } from "./preview/toc";
+import { TocScan } from "./preview/toc.ts";
 
 export interface OutlineItem {
   level: number;

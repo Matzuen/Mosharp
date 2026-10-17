@@ -41,6 +41,7 @@ function specimen(n: number): string[] {
     "| 左 | 中 | 右 |",
     "| :--- | :---: | ---: |",
     `| ${n} | 值 | 末 |`,
+    `| 多行<br>单元格 ${n} | 合并 | 末 |`,
     "",
     "```ts",
     `const line = ${n}`,
@@ -107,7 +108,7 @@ export function generateBenchmark(lineCount = 100_000): string {
     if (lines.length < lineCount) lines.push(row);
   };
 
-  for (const row of ["---", "title: 10 万行基准", "---", ""]) push(row);
+  for (const row of ["---", "title: 10 万行基准", "---", "", "[TOC]", ""]) push(row);
 
   let section = 1;
   while (lines.length < lineCount) {
