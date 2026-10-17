@@ -74,24 +74,28 @@ export function insertLink(view: EditorView) {
 }
 
 export function toggleTask(view: EditorView) {
-  const line = view.state.doc.lineAt(view.state.selection.main.head);
+  const selection = view.state.selection.main;
+  const line = view.state.doc.lineAt(selection.head);
   const task = /^(\s*)([-*+]|\d+\.)\s+\[([ xX])\]\s/.exec(line.text);
   const list = /^(\s*)([-*+]|\d+\.)\s+/.exec(line.text);
   let changes: ChangeSpec;
+  let caret: number;
   if (task) {
     const checked = task[3].toLowerCase() === "x";
     const next = `${task[1]}${task[2]} [${checked ? " " : "x"}] `;
     changes = { from: line.from, to: line.from + task[0].length, insert: next };
+    // Same-length replacement: the caret keeps its position in the line.
+    caret = selection.head + (next.length - task[0].length);
   } else if (list) {
-    changes = {
-      from: line.from,
-      to: line.from + list[0].length,
-      insert: `${list[1]}${list[2]} [ ] `,
-    };
+    const next = `${list[1]}${list[2]} [ ] `;
+    changes = { from: line.from, to: line.from + list[0].length, insert: next };
+    caret = selection.head + (next.length - list[0].length);
   } else {
-    changes = { from: line.from, insert: "- [ ] " };
+    const insert = "- [ ] ";
+    changes = { from: line.from, insert };
+    caret = selection.head + insert.length;
   }
-  view.dispatch({ changes, selection: EditorSelection.cursor(line.to + 6) });
+  view.dispatch({ changes, selection: EditorSelection.cursor(caret) });
   return true;
 }
 

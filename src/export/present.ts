@@ -38,6 +38,10 @@ export function presentSlides(options: {
       </span>
     </div>`;
   document.body.appendChild(overlay);
+  // Make the app behind the slideshow inert: without this, Tab reaches the
+  // editor and typing during a presentation edits the document.
+  const appRoot = document.querySelector(".app");
+  appRoot?.setAttribute("inert", "");
   const stage = overlay.querySelector(".mosharp-slideshow-stage");
   const count = overlay.querySelector("[data-act='count']");
   if (!(stage instanceof HTMLElement) || !(count instanceof HTMLElement)) {
@@ -61,6 +65,26 @@ export function presentSlides(options: {
       event.preventDefault();
       event.stopPropagation();
       close();
+      return;
+    }
+    if (event.key === "Tab") {
+      // Trap focus inside the overlay (it is the only non-inert surface).
+      const focusables = [...overlay.querySelectorAll<HTMLElement>("button")];
+      if (focusables.length === 0) {
+        event.preventDefault();
+        overlay.focus();
+        return;
+      }
+      const first = focusables[0];
+      const last = focusables[focusables.length - 1];
+      const active = document.activeElement;
+      if (event.shiftKey && (active === first || active === overlay)) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && active === last) {
+        event.preventDefault();
+        first.focus();
+      }
       return;
     }
     if (event.key === "ArrowRight" || event.key === " " || event.key === "PageDown") {
@@ -93,6 +117,7 @@ export function presentSlides(options: {
     closed = true;
     window.removeEventListener("keydown", onKey, true);
     overlay.removeEventListener("click", onClick);
+    appRoot?.removeAttribute("inert");
     if (document.fullscreenElement === overlay) void document.exitFullscreen().catch(() => {});
     overlay.remove();
     style.remove();

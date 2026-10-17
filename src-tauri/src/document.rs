@@ -148,6 +148,58 @@ pub fn write_document(path: String, content: String, encoding: Option<String>) -
     write_bytes_atomic(&path, &bytes)
 }
 
+const B64: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+
+fn base64_encode(bytes: &[u8]) -> String {
+    let mut out = String::with_capacity((bytes.len() + 2) / 3 * 4);
+    for chunk in bytes.chunks(3) {
+        let b0 = chunk[0] as u32;
+        let b1 = *chunk.get(1).unwrap_or(&0) as u32;
+        let b2 = *chunk.get(2).unwrap_or(&0) as u32;
+        let n = (b0 << 16) | (b1 << 8) | b2;
+        out.push(B64[(n >> 18) as usize & 63] as char);
+        out.push(B64[(n >> 12) as usize & 63] as char);
+        out.push(if chunk.len() > 1 { B64[(n >> 6) as usize & 63] as char } else { '=' });
+        out.push(if chunk.len() > 2 { B64[n as usize & 63] as char } else { '=' });
+    }
+    out
+}
+
+fn image_mime(name: &str) -> Option<&'static str> {
+    match name.rsplit('.').next()?.to_ascii_lowercase().as_str() {
+        "png" => Some("image/png"),
+        "jpg" | "jpeg" => Some("image/jpeg"),
+        "gif" => Some("image/gif"),
+        "webp" => Some("image/webp"),
+        "bmp" => Some("image/bmp"),
+        "ico" => Some("image/x-icon"),
+        "avif" => Some("image/avif"),
+        "svg" => Some("image/svg+xml"),
+        _ => None,
+    }
+}
+
+/// Read a referenced image as a `data:` URI so HTML/Word/PNG exports can embed
+/// it instead of pointing at a path that only existed next to the source file.
+#[tauri::command]
+pub fn read_image_data_uri(path: String) -> Result<String, String> {
+    let target = PathBuf::from(&path);
+    let meta = fs::metadata(&target).map_err(|err| map_io_error(err, "读取", &target))?;
+    if !meta.is_file() {
+        return Err("只能读取文件".to_string());
+    }
+    if meta.len() > 20 * 1024 * 1024 {
+        return Err("图片超过 20MB".to_string());
+    }
+    let name = target
+        .file_name()
+        .and_then(|value| value.to_str())
+        .unwrap_or_default();
+    let mime = image_mime(name).ok_or_else(|| "不是支持的图片格式".to_string())?;
+    let bytes = fs::read(&target).map_err(|err| map_io_error(err, "读取", &target))?;
+    Ok(format!("data:{mime};base64,{}", base64_encode(&bytes)))
+}
+
 fn write_bytes_atomic(path: &str, bytes: &[u8]) -> Result<(), String> {
     if path.trim().is_empty() {
         return Err("没有保存路径".to_string());

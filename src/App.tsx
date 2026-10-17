@@ -23,11 +23,13 @@ import {
   openFolderPath,
   openMarkdownPath,
   readDocument,
+  recoveryFolder,
   revealInFolder,
   saveMarkdownPath,
   saveRecoveryCopy,
   suppressFileWatch,
   syncFileWatches,
+  takeStartupFiles,
   touchFileWatchBaseline,
   writeDocument,
   type FileEncoding,
@@ -78,6 +80,7 @@ import { chordFromEvent } from "./shell/shortcuts";
 import {
   clampPanelWidth,
   CONTENT_WIDTHS,
+  defaultPreferencesFor,
   LOCALES,
   loadPreferences,
   MAX_PANEL,
@@ -159,6 +162,37 @@ function newTabId(): string {
   return `tab-${crypto.randomUUID()}`;
 }
 
+/** True when a keystroke should be typed rather than treated as a command. */
+function isTextEntryTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) return false;
+  const tag = target.tagName;
+  if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return true;
+  // The CodeMirror surface is a contenteditable div, not a TEXTAREA.
+  return target.isContentEditable;
+}
+
+function hasCommandModifier(chord: string): boolean {
+  return /^(Ctrl|Alt)\+/.test(chord);
+}
+
+/** Keep a fixed-position context menu inside the window. */
+function clampMenuToViewport(x: number, y: number): { left: string; top: string } {
+  const maxLeft = Math.max(8, window.innerWidth - 208);
+  const maxTop = Math.max(8, window.innerHeight - 232);
+  return {
+    left: `${Math.max(8, Math.min(x, maxLeft))}px`,
+    top: `${Math.max(8, Math.min(y, maxTop))}px`,
+  };
+}
+
+const ENCODING_LABELS: Record<string, string> = {
+  "utf-8": "UTF-8",
+  "utf-8-bom": "UTF-8 BOM",
+  "utf-16le": "UTF-16 LE",
+  "utf-16be": "UTF-16 BE",
+  gbk: "GBK",
+};
+
 export default function App() {
   let host!: HTMLDivElement;
   let editor: EditorController | undefined;
@@ -168,6 +202,11 @@ export default function App() {
   let scrollUiTimer: ReturnType<typeof setTimeout> | null = null;
   let activeId = "";
   let restoringSession = false;
+  let lastTreeSignature = "";
+  let lastTreeError = "";
+  let outlineTimer: ReturnType<typeof setTimeout> | null = null;
+  let titleTimer: ReturnType<typeof setTimeout> | null = null;
+  let noticeTimer: ReturnType<typeof setTimeout> | null = null;
 
   const initialPrefs = loadPreferences();
   const [prefs, setPrefs] = createSignal<Preferences>(initialPrefs);
@@ -190,10 +229,35 @@ export default function App() {
 
   const locale = createMemo(() => prefs().locale);
   const activeTab = createMemo(() => tabs().find((tab) => tab.id === activeTabId()) ?? null);
+  const fileFormat = createMemo(() => {
+    const tab = activeTab();
+    if (!tab) return "";
+    const encoding = ENCODING_LABELS[tab.encoding] ?? tab.encoding;
+    return `${encoding} · ${tab.lineEnding === "\r\n" ? "CRLF" : "LF"}`;
+  });
 
   createEffect(() => {
     const unsaved = tabs().some((tab) => tab.dirty);
     if (isTauri()) void setUnsaved(unsaved).catch(() => {});
+  });
+
+  // Status-bar messages must not sit there for the rest of the session.
+  createEffect(() => {
+    const message = notice();
+    if (noticeTimer) clearTimeout(noticeTimer);
+    if (!message) return;
+    noticeTimer = setTimeout(() => {
+      noticeTimer = null;
+      setNotice("");
+    }, 8000);
+  });
+
+  // Per-keystroke outline scanning is debounced away, so opening the panel must
+  // populate it once explicitly.
+  createEffect(() => {
+    if (!prefs().panelOpen || prefs().panelMode !== "outline") return;
+    if (!editor) return;
+    refreshOutline();
   });
 
   function persistPrefs(next: Preferences) {
@@ -307,11 +371,14 @@ export default function App() {
       return {
         path: tab.path,
         content,
-        dirty: tooLarge ? false : tab.dirty,
+        // Keep the dirty flag even when the buffer could not be snapshotted, so
+        // the restore path can tell the user instead of reporting "saved".
+        dirty: tab.dirty,
         scrollTop: isActive ? editor!.getScrollTop() : tab.scrollTop,
         selection,
         lineEnding: tab.lineEnding,
         encoding: tab.encoding,
+        contentDropped: tooLarge,
       };
     });
     saveSession({
@@ -330,7 +397,8 @@ export default function App() {
         : (tab.state?.doc.toString() ?? "");
     if (!content.trim()) return;
     const disk = prepareForSave(content, tab.lineEnding);
-    if (content.length > MAX_SESSION_CHARS) return;
+    // No size cap here: this is the last-resort copy of unsaved work. Session
+    // snapshots may drop large buffers, this must not.
     try {
       const savedPath = await saveRecoveryCopy(
         documentName(tab.path, t(locale(), "untitled")),
@@ -372,6 +440,27 @@ export default function App() {
     setActiveHeading(activeOutlineIndex(items, editor.firstVisibleLine()));
   }
 
+  /**
+   * Outline + window title are expensive (a full document scan and an IPC call)
+   * and must stay off the per-keystroke path.
+   */
+  function scheduleOutlineRefresh() {
+    if (!prefs().panelOpen || prefs().panelMode !== "outline") return;
+    if (outlineTimer) clearTimeout(outlineTimer);
+    outlineTimer = setTimeout(() => {
+      outlineTimer = null;
+      refreshOutline();
+    }, 180);
+  }
+
+  function scheduleTitleSync() {
+    if (titleTimer) clearTimeout(titleTimer);
+    titleTimer = setTimeout(() => {
+      titleTimer = null;
+      void syncTitle();
+    }, 200);
+  }
+
   function markActiveDirty(value: boolean) {
     const id = activeId;
     setTabs((current) =>
@@ -380,7 +469,7 @@ export default function App() {
     setDirty(value);
     if (value) showDirtyBadge();
     else setDirtyBadge(false);
-    void syncTitle();
+    scheduleTitleSync();
     scheduleSessionSave();
   }
 
@@ -562,8 +651,10 @@ export default function App() {
       const total = performance.now() - started;
       const openedEncoding = tabs().find((tab) => tab.id === activeId)?.encoding;
       const encodingNote =
-        openedEncoding && openedEncoding !== "utf-8" ? `，${openedEncoding}` : "";
-      setNotice(`打开 ${formatMs(total)} ms（编辑器 ${formatMs(loaded)} ms）${encodingNote}`);
+        openedEncoding && openedEncoding !== "utf-8" ? ` · ${openedEncoding}` : "";
+      setNotice(
+        `${t(locale(), "open")} ${formatMs(total)} ms · ${formatMs(loaded)} ms${encodingNote}`,
+      );
     } catch (error) {
       setNotice(`${t(locale(), "openFailed")}：${errorText(error)}`);
     }
@@ -575,7 +666,7 @@ export default function App() {
       return;
     }
     try {
-      const selected = await openMarkdownPath();
+      const selected = await openMarkdownPath(t(locale(), "open"));
       if (!selected) return;
       await openPathInTab(selected);
     } catch (error) {
@@ -638,7 +729,7 @@ export default function App() {
       return;
     }
     try {
-      const selected = await openFolderPath();
+      const selected = await openFolderPath(t(locale(), "openFolder"));
       if (!selected) return;
       patchPrefs({ workspaceRoot: selected, panelOpen: true, panelMode: "files" });
       await reloadTree(selected);
@@ -694,6 +785,7 @@ export default function App() {
 
   async function reloadTree(root = prefs().workspaceRoot) {
     if (!root || !isTauri()) {
+      lastTreeSignature = "";
       setTree([]);
       return;
     }
@@ -707,9 +799,20 @@ export default function App() {
         expanded: false,
         children: entry.is_dir ? null : undefined,
       }));
-      setTree(applyExpanded(next, expanded));
+      const applied = applyExpanded(next, expanded);
+      const signature = treeSignature(applied);
+      lastTreeError = "";
+      if (signature === lastTreeSignature) return;
+      lastTreeSignature = signature;
+      setTree(applied);
     } catch (error) {
-      setNotice(`${t(locale(), "openFailed")}：${errorText(error)}`);
+      // A folder that vanished or became unreadable would otherwise overwrite
+      // the status bar with the same error on every poll tick.
+      const message = `${t(locale(), "openFailed")}：${errorText(error)}`;
+      if (message !== lastTreeError) {
+        lastTreeError = message;
+        setNotice(message);
+      }
     }
   }
 
@@ -759,13 +862,41 @@ export default function App() {
     return out;
   }
 
+  /**
+   * Stable description of the visible tree. Repainting an identical tree every
+   * poll destroys keyboard focus, hover state and the rows themselves, so the
+   * poll only commits when something actually changed.
+   */
+  function treeSignature(nodes: TreeNode[]): string {
+    const parts: string[] = [];
+    const walk = (list: TreeNode[]) => {
+      for (const node of list) {
+        parts.push(`${node.path}|${node.is_dir ? 1 : 0}|${node.expanded ? 1 : 0}`);
+        if (node.expanded && node.children) walk(node.children);
+      }
+    };
+    walk(nodes);
+    return parts.join("\n");
+  }
+
   async function persist(target: string) {
     if (!editor) return;
+    let imageWarning = "";
     try {
       if (isTauri()) {
         await suppressFileWatch(target);
+        const targetDir = target.replace(/[\\/][^\\/]*$/, "").replace(/\\/g, "/").toLowerCase();
         for (const image of pendingImagesIn(editor.text())) {
-          await placeImage(target, image.relative, image.absolute);
+          // Images already sitting next to this document need no move. Moving
+          // them is what used to make "Save As" fail permanently.
+          const source = image.absolute.replace(/\\/g, "/").toLowerCase();
+          if (source.startsWith(`${targetDir}/`)) continue;
+          try {
+            await placeImage(target, image.relative, image.absolute);
+          } catch (error) {
+            // A stranded image must never block writing the document itself.
+            imageWarning = errorText(error);
+          }
         }
       }
       const active = tabs().find((tab) => tab.id === activeId);
@@ -774,19 +905,33 @@ export default function App() {
       const disk = prepareForSave(editor.text(), ending);
       const buffer = savedBuffer(editor.text());
       if (buffer !== editor.text()) editor.rewrite(buffer);
+      // Snapshot exactly what goes to disk. Typing during the write must not be
+      // reported as saved, or the user closes the tab and loses those keystrokes.
+      const written = editor.text();
       await writeDocument(target, disk, encoding);
       if (isTauri()) await touchFileWatchBaseline(target);
+      const stillClean = editor.text() === written;
       setTabs((current) =>
-        current.map((tab) => (tab.id === activeId ? { ...tab, path: target, dirty: false } : tab)),
+        current.map((tab) =>
+          tab.id === activeId
+            ? { ...tab, path: target, dirty: stillClean ? false : tab.dirty }
+            : tab,
+        ),
       );
-      setDirty(false);
-      setDirtyBadge(false);
+      if (stillClean) {
+        setDirty(false);
+        setDirtyBadge(false);
+      }
       rememberRecent(target);
       void syncTitle();
       scheduleSessionSave();
       refreshWatches();
       editor.setDocumentPath(target);
-      setNotice(t(locale(), "savedOk"));
+      if (imageWarning) {
+        setNotice(`${t(locale(), "savedOk")} — ${imageWarning}`);
+      } else {
+        setNotice(t(locale(), "savedOk"));
+      }
       if (prefs().workspaceRoot) void reloadTree();
     } catch (error) {
       setNotice(`${t(locale(), "saveFailed")}：${errorText(error)}`);
@@ -822,6 +967,8 @@ export default function App() {
       });
     } finally {
       if (editor.getModes().sourceMode !== sourceMode) editor.setModes({ sourceMode });
+      // Export steals focus (print host, slideshow); give it back.
+      editor.focus();
     }
   }
 
@@ -833,7 +980,7 @@ export default function App() {
     }
     try {
       const suggested = activeTab()?.path ?? `${t(locale(), "untitled")}.md`;
-      const selected = await saveMarkdownPath(suggested);
+      const selected = await saveMarkdownPath(t(locale(), "save"), suggested);
       if (!selected) return;
       await persist(selected);
     } catch (error) {
@@ -854,14 +1001,14 @@ export default function App() {
 
   async function loadBenchmark() {
     if (!editor) return;
-    setNotice("正在生成 10 万行…");
+    setNotice(`${t(locale(), "benchmark")} …`);
     await new Promise<void>((resolve) => setTimeout(resolve, 0));
 
     const generatedAt = performance.now();
     const text = generateBenchmark(BENCHMARK_LINES);
     const generateMs = performance.now() - generatedAt;
 
-    setNotice("正在载入编辑器…");
+    setNotice(`${t(locale(), "benchmark")} …`);
     await new Promise<void>((resolve) => setTimeout(resolve, 0));
     createTab(null, text, false);
 
@@ -873,7 +1020,8 @@ export default function App() {
     refreshStats();
     refreshOutline();
     setNotice(
-      `基准 ${BENCHMARK_LINES.toLocaleString("zh-CN")} 行：生成 ${formatMs(generateMs)} ms，输入 ${formatMs(maxInput)} ms，跳到文末 ${formatMs(scrollMs)} ms`,
+      `${t(locale(), "benchmark")}: ${BENCHMARK_LINES.toLocaleString(locale())} · ` +
+        `${formatMs(generateMs)} / ${formatMs(maxInput)} / ${formatMs(scrollMs)} ms`,
     );
   }
 
@@ -915,6 +1063,25 @@ export default function App() {
     } catch (error) {
       setNotice(errorText(error));
     }
+  }
+
+  /** The recovery folder was written by the app but had no entry point. */
+  async function openRecoveryFolder() {
+    if (!isTauri()) {
+      setNotice(t(locale(), "needDesktop"));
+      return;
+    }
+    try {
+      await revealInFolder(await recoveryFolder());
+    } catch (error) {
+      setNotice(errorText(error));
+    }
+  }
+
+  function resetPreferences() {
+    const defaults = defaultPreferencesFor();
+    persistPrefs(defaults);
+    setNotice(t(defaults.locale, "restoreDefaults"));
   }
 
   function closeMenu() {
@@ -1175,6 +1342,17 @@ export default function App() {
             run: () => setPaletteOpen(true),
           },
           { id: "benchmark", label: label("benchmark"), run: () => void loadBenchmark() },
+          { id: "sep-help", sep: true },
+          {
+            id: "open-recovery",
+            label: label("openRecovery"),
+            run: () => void openRecoveryFolder(),
+          },
+          {
+            id: "reset-prefs",
+            label: label("restoreDefaults"),
+            run: () => resetPreferences(),
+          },
         ],
       },
     ];
@@ -1188,54 +1366,66 @@ export default function App() {
     restoringSession = true;
     try {
       const created: TabRecord[] = [];
+      let dropped = 0;
       for (const snap of session.tabs) {
-        let content = snap.content;
-        let dirtyValue = snap.dirty;
-        let path = snap.path;
-        let lineEnding: LineEnding = snap.lineEnding === "\r\n" ? "\r\n" : "\n";
-        let encoding = normalizeEncoding(snap.encoding);
+        // A single malformed tab must never abort the whole restore: that used
+        // to leave the window open with zero tabs.
+        try {
+          let content = snap.content;
+          let dirtyValue = snap.dirty;
+          const path = snap.path;
+          let lineEnding: LineEnding = snap.lineEnding === "\r\n" ? "\r\n" : "\n";
+          let encoding = normalizeEncoding(snap.encoding);
+          const lostBuffer = Boolean(snap.contentDropped) && dirtyValue;
 
-        if (path && isTauri()) {
-          try {
-            const opened = await readDocument(path);
-            lineEnding = detectLineEnding(opened.content);
-            encoding = normalizeEncoding(opened.encoding);
-            if (snap.dirty && snap.content && !sameText(snap.content, opened.content)) {
-              content = snap.content;
+          if (path && isTauri()) {
+            try {
+              const opened = await readDocument(path);
+              lineEnding = detectLineEnding(opened.content);
+              encoding = normalizeEncoding(opened.encoding);
+              if (snap.dirty && snap.content && !sameText(snap.content, opened.content)) {
+                content = snap.content;
+                dirtyValue = true;
+              } else {
+                content = opened.content;
+                dirtyValue = false;
+              }
+            } catch {
+              content = snap.content || INITIAL_DOCUMENT;
               dirtyValue = true;
-            } else {
-              content = opened.content;
-              dirtyValue = false;
             }
-          } catch {
-            content = snap.content || INITIAL_DOCUMENT;
-            dirtyValue = true;
+          } else if (!content) {
+            content = INITIAL_DOCUMENT;
           }
-        } else if (!content) {
-          content = INITIAL_DOCUMENT;
-        }
+          if (lostBuffer) dropped += 1;
 
-        const base = editor.createState(content);
-        const max = base.doc.length;
-        const state = base.update({
-          selection: {
-            anchor: Math.max(0, Math.min(snap.selection.anchor, max)),
-            head: Math.max(0, Math.min(snap.selection.head, max)),
-          },
-        }).state;
-        created.push({
-          id: newTabId(),
-          path,
-          dirty: dirtyValue,
-          state,
-          scrollTop: snap.scrollTop,
-          lineEnding,
-          encoding,
-        });
-        if (path) rememberRecent(path);
+          const base = editor.createState(content);
+          const max = base.doc.length;
+          const anchor = Number.isFinite(snap.selection?.anchor) ? snap.selection.anchor : 0;
+          const head = Number.isFinite(snap.selection?.head) ? snap.selection.head : anchor;
+          const state = base.update({
+            selection: {
+              anchor: Math.max(0, Math.min(anchor, max)),
+              head: Math.max(0, Math.min(head, max)),
+            },
+          }).state;
+          created.push({
+            id: newTabId(),
+            path,
+            dirty: dirtyValue,
+            state,
+            scrollTop: Number.isFinite(snap.scrollTop) ? snap.scrollTop : 0,
+            lineEnding,
+            encoding,
+          });
+          if (path) rememberRecent(path);
+        } catch {
+          // Skip the broken tab, keep the rest.
+        }
       }
 
       if (created.length === 0) return false;
+      if (dropped > 0) setNotice(t(locale(), "restoreDropped"));
 
       const active = created[Math.min(session.activeIndex, created.length - 1)];
       setTabs(created);
@@ -1252,6 +1442,8 @@ export default function App() {
       refreshWatches();
       editor.focus();
       return true;
+    } catch {
+      return false;
     } finally {
       restoringSession = false;
     }
@@ -1272,23 +1464,33 @@ export default function App() {
     }
     try {
       const opened = await readDocument(tab.path);
+      // Re-read the live record: the user may have typed while the disk read
+      // was in flight, and that text must not be replaced.
+      const liveTab = tabs().find((item) => item.id === tab.id);
+      if (!liveTab) return;
+      const livePath = liveTab.path;
+      if (!livePath) return;
+      if (liveTab.dirty) {
+        setNotice(t(locale(), "externalConflict"));
+        return;
+      }
       const current =
-        tab.id === activeId && editor
+        liveTab.id === activeId && editor
           ? editor.text()
-          : (tab.state?.doc.toString() ?? "");
+          : (liveTab.state?.doc.toString() ?? "");
       if (sameText(current, opened.content)) {
         const lineEnding = detectLineEnding(opened.content);
-        if (tab.lineEnding !== lineEnding) {
+        if (liveTab.lineEnding !== lineEnding) {
           setTabs((items) =>
-            items.map((item) => (item.id === tab.id ? { ...item, lineEnding } : item)),
+            items.map((item) => (item.id === liveTab.id ? { ...item, lineEnding } : item)),
           );
         }
-        if (isTauri()) await touchFileWatchBaseline(tab.path);
+        if (isTauri()) await touchFileWatchBaseline(livePath);
         return;
       }
 
       const lineEnding = detectLineEnding(opened.content);
-      if (tab.id === activeId && editor) {
+      if (liveTab.id === activeId && editor) {
         const scrollTop = editor.getScrollTop();
         const selection = editor.getSelection();
         editor.replace(opened.content);
@@ -1296,7 +1498,7 @@ export default function App() {
         editor.setScrollTop(scrollTop);
         setTabs((current) =>
           current.map((item) =>
-            item.id === tab.id
+            item.id === liveTab.id
               ? { ...item, dirty: false, state: editor!.getState(), scrollTop, lineEnding }
               : item,
           ),
@@ -1310,15 +1512,38 @@ export default function App() {
         const state = editor.createState(opened.content);
         setTabs((current) =>
           current.map((item) =>
-            item.id === tab.id ? { ...item, dirty: false, state, lineEnding } : item,
+            item.id === liveTab.id ? { ...item, dirty: false, state, lineEnding } : item,
           ),
         );
       }
-      if (isTauri()) await touchFileWatchBaseline(tab.path);
+      if (isTauri()) await touchFileWatchBaseline(livePath);
       scheduleSessionSave();
       setNotice(t(locale(), "externalReload"));
     } catch (error) {
       setNotice(`${t(locale(), "openFailed")}：${errorText(error)}`);
+    }
+  }
+
+  /**
+   * Open the documents Windows passed on the command line (Explorer
+   * double-click / file association). Session restore must not swallow them:
+   * that made double-clicking a file show the previously closed document.
+   */
+  async function openStartupFiles() {
+    if (!isTauri()) return;
+    let paths: string[] = [];
+    try {
+      paths = await takeStartupFiles();
+    } catch {
+      return;
+    }
+    if (!paths.length) return;
+    const blanks = tabs().filter((tab) => !tab.path && !tab.dirty).map((tab) => tab.id);
+    for (const path of paths) await openPathInTab(path);
+    // Only discard the empty placeholder if a requested file really opened.
+    if (!tabs().some((tab) => tab.path)) return;
+    if (blanks.length > 0) {
+      setTabs((current) => current.filter((tab) => !blanks.includes(tab.id)));
     }
   }
 
@@ -1353,7 +1578,7 @@ export default function App() {
       editor = createEditor(host, {
         onEdit() {
           refreshStats();
-          refreshOutline();
+          scheduleOutlineRefresh();
           markActiveDirty(true);
         },
         initialModes: {
@@ -1364,7 +1589,7 @@ export default function App() {
         locale: initialPrefs.locale,
       });
     } catch (error) {
-      setNotice(`编辑器启动失败：${errorText(error)}`);
+      setNotice(`Mosharp: ${errorText(error)}`);
       return;
     }
     applyEditorPrefs();
@@ -1393,6 +1618,9 @@ export default function App() {
       } else {
         setNotice(t(locale(), "restored"));
       }
+      // Restoring the session first keeps the user's tabs, then the file they
+      // actually asked for becomes the active tab.
+      await openStartupFiles();
     })();
 
     if (initialPrefs.workspaceRoot && isTauri()) {
@@ -1417,15 +1645,32 @@ export default function App() {
 
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
-        closeMenu();
-        setPaletteOpen(false);
-        if (!document.querySelector(".settings-dialog.recording")) setSettingsOpen(false);
+        // One layer per press, innermost first, and give focus back to the
+        // editor so typing works again immediately.
+        if (menu()) {
+          closeMenu();
+          return;
+        }
+        if (paletteOpen()) {
+          setPaletteOpen(false);
+          editor?.focus();
+          return;
+        }
+        if (settingsOpen() && !document.querySelector(".settings-dialog.recording")) {
+          setSettingsOpen(false);
+          editor?.focus();
+        }
+        return;
       }
       if (document.querySelector(".settings-dialog.recording")) return;
-      const target = event.target as HTMLElement | null;
-      if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA")) return;
+      // An open dialog owns the keyboard; global commands must not fire behind it.
+      if (paletteOpen() || settingsOpen()) return;
       const chord = chordFromEvent(event);
       if (!chord) return;
+      // Modifier-less chords are typing, not commands (and the recorder now
+      // refuses them). Ctrl/Alt chords stay global so Ctrl+S works from the
+      // sidebar search box too.
+      if (!hasCommandModifier(chord) && isTextEntryTarget(event.target)) return;
       const hit = (id: ShortcutId) => shortcut(id) === chord;
       const run = (fn: () => void) => {
         event.preventDefault();
@@ -1451,6 +1696,7 @@ export default function App() {
 
     let unlistenClose: (() => void) | undefined;
     let unlistenChange: (() => void) | undefined;
+    let unlistenOpen: (() => void) | undefined;
     let unlistenDrop: (() => void) | undefined;
     if (isTauri()) {
       void listen<number>("mosharp-confirm-close", (event) => {
@@ -1459,6 +1705,9 @@ export default function App() {
           try {
             await ackClosePrompt(token);
           } catch {
+            // Never leave Rust waiting on a token that will not be resolved —
+            // that makes the window permanently unclosable.
+            await resolveClose(token, false).catch(() => {});
             return;
           }
           captureActive();
@@ -1490,6 +1739,13 @@ export default function App() {
         void onExternalDocumentChange(event.payload.path, event.payload.kind);
       }).then((stop) => {
         unlistenChange = stop;
+      });
+
+      // A second launch (another double-click) is routed into this window.
+      void listen<string[]>("mosharp-open-files", (event) => {
+        for (const path of event.payload) void openPathInTab(path);
+      }).then((stop) => {
+        unlistenOpen = stop;
       });
 
       void getCurrentWebview()
@@ -1559,6 +1815,7 @@ export default function App() {
       if (scrollUiTimer) clearTimeout(scrollUiTimer);
       unlistenClose?.();
       unlistenChange?.();
+      unlistenOpen?.();
       unlistenDrop?.();
       window.removeEventListener("dragenter", onDragEnter);
       window.removeEventListener("dragover", onDragOver);
@@ -1640,7 +1897,10 @@ export default function App() {
           actions={paletteActions()}
           placeholder={t(locale(), "commandPalette")}
           empty={t(locale(), "noCommand")}
-          onClose={() => setPaletteOpen(false)}
+          onClose={() => {
+            setPaletteOpen(false);
+            editor?.focus();
+          }}
         />
       </Show>
       <Show when={settingsOpen()}>
@@ -1648,7 +1908,10 @@ export default function App() {
           locale={locale()}
           prefs={prefs()}
           onChange={patchPrefs}
-          onClose={() => setSettingsOpen(false)}
+          onClose={() => {
+            setSettingsOpen(false);
+            editor?.focus();
+          }}
         />
       </Show>
       <header class="chrome">
@@ -1699,7 +1962,7 @@ export default function App() {
           <button
             type="button"
             class="tab-add"
-            title={`${t(locale(), "new")} (Ctrl+T)`}
+            title={shortcut("newFile") ? `${t(locale(), "new")} (${shortcut("newFile")})` : t(locale(), "new")}
             onClick={() => newDoc()}
           >
             +
@@ -1843,6 +2106,9 @@ export default function App() {
               ? t(locale(), "saved")
               : t(locale(), "unchanged")}
         </span>
+        <span class="status-format" title={fileFormat()}>
+          {fileFormat()}
+        </span>
         <span class="status-path" title={activeTab()?.path ?? ""}>
           {activeTab()?.path ?? t(locale(), "notWritten")}
         </span>
@@ -1853,7 +2119,7 @@ export default function App() {
         {(state) => (
           <div
             class="context-menu"
-            style={{ left: `${state().x}px`, top: `${state().y}px` }}
+            style={clampMenuToViewport(state().x, state().y)}
             onClick={(event) => event.stopPropagation()}
           >
             <Show when={state().kind === "tab" && state().tabId}>

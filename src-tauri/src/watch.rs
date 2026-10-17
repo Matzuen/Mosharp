@@ -291,11 +291,7 @@ pub fn touch_file_watch_baseline(
 
 #[tauri::command]
 pub fn save_recovery_copy(suggested_name: String, content: String) -> Result<String, String> {
-    let home = std::env::var_os("USERPROFILE")
-        .or_else(|| std::env::var_os("HOME"))
-        .ok_or_else(|| "找不到用户目录".to_string())?;
-    let dir = PathBuf::from(home).join(".mosharp").join("recovered");
-    fs::create_dir_all(&dir).map_err(|err| err.to_string())?;
+    let dir = recovery_dir()?;
 
     let stem = Path::new(&suggested_name)
         .file_stem()
@@ -311,11 +307,50 @@ pub fn save_recovery_copy(suggested_name: String, content: String) -> Result<Str
             }
         })
         .collect();
+    // Millisecond stamp plus a create-exclusive retry: several tabs can be
+    // discarded in the same second and every copy must survive on its own.
     let stamp = SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .map(|value| value.as_secs())
+        .map(|value| value.as_millis())
         .unwrap_or(0);
-    let path = dir.join(format!("{stamp}-{safe}.md"));
-    fs::write(&path, content.as_bytes()).map_err(|err| err.to_string())?;
-    Ok(path.to_string_lossy().into_owned())
+    let mut attempt: u32 = 0;
+    loop {
+        let name = if attempt == 0 {
+            format!("{stamp}-{safe}.md")
+        } else {
+            format!("{stamp}-{safe}-{attempt}.md")
+        };
+        let path = dir.join(name);
+        match std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&path)
+        {
+            Ok(mut file) => {
+                use std::io::Write;
+                file.write_all(content.as_bytes())
+                    .map_err(|err| err.to_string())?;
+                return Ok(path.to_string_lossy().into_owned());
+            }
+            Err(err) if err.kind() == std::io::ErrorKind::AlreadyExists && attempt < 1000 => {
+                attempt += 1;
+            }
+            Err(err) => return Err(err.to_string()),
+        }
+    }
+}
+
+fn recovery_dir() -> Result<PathBuf, String> {
+    let home = std::env::var_os("USERPROFILE")
+        .or_else(|| std::env::var_os("HOME"))
+        .ok_or_else(|| "找不到用户目录".to_string())?;
+    let dir = PathBuf::from(home).join(".mosharp").join("recovered");
+    fs::create_dir_all(&dir).map_err(|err| err.to_string())?;
+    Ok(dir)
+}
+
+/// Path of the recovery folder, created on demand so the UI can reveal it.
+#[tauri::command]
+pub fn recovery_folder() -> Result<String, String> {
+    recovery_dir().map(|dir| dir.to_string_lossy().into_owned())
 }

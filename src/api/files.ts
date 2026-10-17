@@ -25,28 +25,28 @@ export interface OpenedDocument {
   encoding?: string;
 }
 
-export async function openMarkdownPath(): Promise<string | null> {
+export async function openMarkdownPath(title: string): Promise<string | null> {
   const selected = await open({
     multiple: false,
-    title: "打开 Markdown",
+    title,
     filters: markdownFilter,
   });
   return typeof selected === "string" ? selected : null;
 }
 
-export async function openFolderPath(): Promise<string | null> {
+export async function openFolderPath(title: string): Promise<string | null> {
   const selected = await open({
     directory: true,
     multiple: false,
-    title: "打开文件夹",
+    title,
   });
   return typeof selected === "string" ? selected : null;
 }
 
-export async function saveMarkdownPath(suggested?: string): Promise<string | null> {
+export async function saveMarkdownPath(title: string, suggested: string): Promise<string | null> {
   return save({
-    title: "保存 Markdown",
-    defaultPath: suggested ?? "未命名.md",
+    title,
+    defaultPath: suggested,
     filters: [{ name: "Markdown", extensions: ["md"] }],
   });
 }
@@ -81,4 +81,22 @@ export function touchFileWatchBaseline(path: string): Promise<void> {
 
 export function saveRecoveryCopy(suggestedName: string, content: string): Promise<string> {
   return invoke("save_recovery_copy", { suggestedName, content });
+}
+
+/** Path of the recovery folder, created on demand. */
+export function recoveryFolder(): Promise<string> {
+  return invoke("recovery_folder");
+}
+
+/** Read a referenced image as a data: URI so exports can embed it. */
+export function readImageDataUri(path: string): Promise<string> {
+  return invoke("read_image_data_uri", { path });
+}
+
+/**
+ * Documents that were passed on this launch's command line (Explorer
+ * double-click / file association). Consumed once.
+ */
+export function takeStartupFiles(): Promise<string[]> {
+  return invoke<string[]>("take_startup_files");
 }

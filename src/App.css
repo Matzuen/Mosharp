@@ -55,7 +55,10 @@
   font-size: 16px;
   color: var(--ink);
   background: var(--paper);
-  font-synthesis: none;
+  /* Allow synthetic oblique (CJK faces such as Microsoft YaHei have no italic
+     face, so `font-style: italic` was silently ignored) while still refusing
+     fake bold. */
+  font-synthesis: style;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
 }
@@ -394,6 +397,8 @@ textarea {
 .menu-drop {
   top: calc(100% + 2px);
   left: 0;
+  max-height: min(70vh, calc(100vh - 80px));
+  overflow: auto;
 }
 
 .menu-flyout {
@@ -638,6 +643,12 @@ textarea {
   max-width: 36vw;
 }
 
+.status-format {
+  flex: none;
+  color: var(--faint);
+  font-variant-numeric: tabular-nums;
+}
+
 .status-dirty {
   color: var(--accent);
   font-weight: 600;
@@ -656,6 +667,8 @@ textarea {
   position: fixed;
   z-index: 50;
   min-width: 168px;
+  max-height: calc(100vh - 16px);
+  overflow: auto;
   padding: 4px;
   border: 1px solid var(--line);
   border-radius: 8px;

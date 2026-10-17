@@ -1,9 +1,7 @@
 # 编写主题
-
 一套主题一个 CSS 文件。文件名就是主题 id，例如 `elegant.css`。选择器必须是 `html[data-theme="主题 id"]`，只改这一组变量，不要写组件选择器。
 
 新增一套时做三件事：
-
 1. 复制一份现有 CSS，改 id 和颜色。
 2. 在 `catalog.ts` 的 `THEMES` 里登记 id、浅色或深色、中文名、英文名和色块（色块等于 `--paper`）。
 3. 在 `styles.ts` 里加上这行 CSS 的 import。

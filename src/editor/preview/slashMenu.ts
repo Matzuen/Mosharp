@@ -1,4 +1,5 @@
 import { EditorView, ViewPlugin, type PluginValue, type ViewUpdate } from "@codemirror/view";
+import { placeMenu } from "./menuPlacement";
 import { sourceModeField } from "./modes";
 import { slashItems } from "./toolbar";
 
@@ -8,15 +9,27 @@ class SlashMenu implements PluginValue {
   triggerFrom = -1;
   active = 0;
   items: typeof slashItems = [];
+  private signature = "";
   private onKey: (event: KeyboardEvent) => void;
+  private onScroll: () => void;
 
   constructor(readonly view: EditorView) {
     this.dom = document.createElement("div");
     this.dom.className = "cm-slash-menu";
     this.dom.style.display = "none";
+    // Stays inside the editor so CodeMirror's scoped base theme applies to it
+    // (baseTheme rules are prefixed with the editor class, so anything attached
+    // to <body> would be completely unstyled).
     view.dom.appendChild(this.dom);
+    // ...but `fixed` is set inline so the position is measured against the
+    // viewport. `.cm-editor` is statically positioned, so an absolutely
+    // positioned child resolved against an unrelated containing block and
+    // drifted away from the caret.
+    this.dom.style.position = "fixed";
     this.onKey = (event) => {
       if (!this.open) return;
+      // Never steal keys the IME needs to commit a composition (CJK input).
+      if (event.isComposing || event.keyCode === 229) return;
       if (event.key === "ArrowDown") {
         event.preventDefault();
         event.stopPropagation();
@@ -38,6 +51,16 @@ class SlashMenu implements PluginValue {
       }
     };
     view.contentDOM.addEventListener("keydown", this.onKey, true);
+    // CodeMirror only re-renders (and therefore dispatches an update) once the
+    // viewport actually moves past its render margin, so small scrolls never
+    // reach `update()`. Track the scroller directly or the menu stays behind
+    // while the caret scrolls away.
+    this.onScroll = () => {
+      if (!this.open) return;
+      this.place(this.view.state.selection.main.head);
+    };
+    view.scrollDOM.addEventListener("scroll", this.onScroll, { passive: true });
+    window.addEventListener("resize", this.onScroll);
   }
 
   update(update: ViewUpdate) {
@@ -45,15 +68,13 @@ class SlashMenu implements PluginValue {
       this.hide();
       return;
     }
-    if (!update.docChanged && !update.selectionSet) return;
     const selection = update.state.selection.main;
-    if (!selection.empty) {
-      this.hide();
-      return;
+    let match: RegExpExecArray | null = null;
+    if (selection.empty) {
+      const line = update.state.doc.lineAt(selection.head);
+      const before = line.text.slice(0, selection.head - line.from);
+      match = /(^|\s)\/([^\s]*)$/.exec(before);
     }
-    const line = update.state.doc.lineAt(selection.head);
-    const before = line.text.slice(0, selection.head - line.from);
-    const match = /(^|\s)\/([^\s]*)$/.exec(before);
     if (!match) {
       this.hide();
       return;
@@ -65,26 +86,54 @@ class SlashMenu implements PluginValue {
       return;
     }
     this.triggerFrom = selection.head - match[2].length - 1;
-    if (!this.open || this.items.length !== items.length) this.active = 0;
+    const signature = items.map((item) => item.label).join("|");
+    if (!this.open || signature !== this.signature) {
+      this.signature = signature;
+      this.active = 0;
+      this.render(items);
+    }
     this.items = items;
-    this.render(items);
     this.open = true;
     this.dom.style.display = "block";
-    const head = selection.head;
+    // Re-place on every update, not just content changes: after the document
+    // re-measures (estimated block heights above the viewport) a caret that did
+    // not move can still change screen position.
+    this.place(selection.head);
+  }
+
+  /** Anchor to the caret in viewport coordinates and keep the menu on screen. */
+  private place(head: number) {
     this.view.requestMeasure({
+      key: this,
       read: (view) => {
-        const coords = view.coordsAtPos(head);
+        const coords = view.coordsAtPos(head, 1);
         if (!coords) return null;
-        const editorRect = view.dom.getBoundingClientRect();
-        return {
-          top: coords.bottom - editorRect.top + 6,
-          left: coords.left - editorRect.left,
-        };
+        // The menu is already visible at this point, so its real size is known.
+        const rect = this.dom.getBoundingClientRect();
+        return { coords, width: rect.width, height: rect.height };
       },
       write: (measure) => {
-        if (!this.open || !measure) return;
-        this.dom.style.top = `${measure.top}px`;
-        this.dom.style.left = `${Math.max(8, measure.left)}px`;
+        if (!this.open) return;
+        if (!measure) {
+          // The caret is not rendered (scrolled out of the viewport); a menu
+          // parked at a stale offset would just be a stray box.
+          this.hide();
+          return;
+        }
+        const { coords, width, height } = measure;
+        // The caret scrolled out of the window: a menu pinned to the edge would
+        // just float next to unrelated text.
+        if (coords.bottom < 0 || coords.top > window.innerHeight) {
+          this.hide();
+          return;
+        }
+        const box = placeMenu(
+          coords,
+          { width, height },
+          { width: window.innerWidth, height: window.innerHeight },
+        );
+        this.dom.style.top = `${box.top}px`;
+        this.dom.style.left = `${box.left}px`;
       },
     });
   }
@@ -129,10 +178,13 @@ class SlashMenu implements PluginValue {
     this.triggerFrom = -1;
     this.items = [];
     this.active = 0;
+    this.signature = "";
   }
 
   destroy() {
     this.view.contentDOM.removeEventListener("keydown", this.onKey, true);
+    this.view.scrollDOM.removeEventListener("scroll", this.onScroll);
+    window.removeEventListener("resize", this.onScroll);
     this.dom.remove();
   }
 }
@@ -141,9 +193,11 @@ export const slashMenuPlugin = ViewPlugin.fromClass(SlashMenu);
 
 export const slashMenuTheme = EditorView.baseTheme({
   ".cm-slash-menu": {
-    position: "absolute",
-    zIndex: "21",
+    position: "fixed",
+    zIndex: "60",
     minWidth: "160px",
+    maxHeight: "min(60vh, 420px)",
+    overflowY: "auto",
     padding: "4px",
     borderRadius: "8px",
     border: "1px solid var(--line)",

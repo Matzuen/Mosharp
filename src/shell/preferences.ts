@@ -116,7 +116,15 @@ function loadShortcuts(value: unknown): ShortcutMap {
 }
 
 function clampPanelWidth(width: number): number {
-  return Math.min(MAX_PANEL, Math.max(MIN_PANEL, Math.round(width)));
+  const value = Number.isFinite(width) ? width : defaultPreferences.panelWidth;
+  return Math.min(MAX_PANEL, Math.max(MIN_PANEL, Math.round(value)));
+}
+
+/** Persisted booleans may be strings from an older build; only real booleans win. */
+function pickBool(value: unknown, fallback: boolean): boolean {
+  if (value === true) return true;
+  if (value === false) return false;
+  return fallback;
 }
 
 export function loadPreferences(): Preferences {
@@ -125,7 +133,7 @@ export function loadPreferences(): Preferences {
     if (!raw) return { ...defaultPreferences, shortcuts: { ...DEFAULT_SHORTCUTS } };
     const parsed = JSON.parse(raw) as Partial<Preferences>;
     return {
-      panelOpen: parsed.panelOpen ?? defaultPreferences.panelOpen,
+      panelOpen: pickBool(parsed.panelOpen, defaultPreferences.panelOpen),
       panelWidth: clampPanelWidth(parsed.panelWidth ?? defaultPreferences.panelWidth),
       panelMode: parsed.panelMode === "outline" ? "outline" : "files",
       contentWidth: CONTENT_WIDTHS.includes(parsed.contentWidth as ContentWidth)
@@ -148,15 +156,15 @@ export function loadPreferences(): Preferences {
           : null,
       workspaceRoot:
         typeof parsed.workspaceRoot === "string" ? parsed.workspaceRoot : null,
-      sourceMode: parsed.sourceMode ?? defaultPreferences.sourceMode,
-      typewriter: parsed.typewriter ?? defaultPreferences.typewriter,
-      focusMode: parsed.focusMode ?? defaultPreferences.focusMode,
-      footnotes: parsed.footnotes ?? defaultPreferences.footnotes,
-      emoji: parsed.emoji ?? defaultPreferences.emoji,
-      superSub: parsed.superSub ?? defaultPreferences.superSub,
-      pandocMath: parsed.pandocMath ?? defaultPreferences.pandocMath,
-      pasteImages: parsed.pasteImages ?? defaultPreferences.pasteImages,
-      spellcheck: parsed.spellcheck ?? defaultPreferences.spellcheck,
+      sourceMode: pickBool(parsed.sourceMode, defaultPreferences.sourceMode),
+      typewriter: pickBool(parsed.typewriter, defaultPreferences.typewriter),
+      focusMode: pickBool(parsed.focusMode, defaultPreferences.focusMode),
+      footnotes: pickBool(parsed.footnotes, defaultPreferences.footnotes),
+      emoji: pickBool(parsed.emoji, defaultPreferences.emoji),
+      superSub: pickBool(parsed.superSub, defaultPreferences.superSub),
+      pandocMath: pickBool(parsed.pandocMath, defaultPreferences.pandocMath),
+      pasteImages: pickBool(parsed.pasteImages, defaultPreferences.pasteImages),
+      spellcheck: pickBool(parsed.spellcheck, defaultPreferences.spellcheck),
       spellLang: parsed.spellLang === "en-US" ? "en-US" : "zh-CN",
       customWords: typeof parsed.customWords === "string" ? parsed.customWords : "",
       shortcuts: loadShortcuts(parsed.shortcuts),
@@ -167,13 +175,22 @@ export function loadPreferences(): Preferences {
 }
 
 export function savePreferences(prefs: Preferences): void {
-  localStorage.setItem(
-    KEY,
-    JSON.stringify({
-      ...prefs,
-      panelWidth: clampPanelWidth(prefs.panelWidth),
-    }),
-  );
+  try {
+    localStorage.setItem(
+      KEY,
+      JSON.stringify({
+        ...prefs,
+        panelWidth: clampPanelWidth(prefs.panelWidth),
+      }),
+    );
+  } catch {
+    // A quota failure must not surface as a failed document save.
+  }
+}
+
+/** Everything back to factory defaults (used by Settings ▸ 恢复默认). */
+export function defaultPreferencesFor(): Preferences {
+  return { ...defaultPreferences, shortcuts: { ...DEFAULT_SHORTCUTS } };
 }
 
 export { MIN_PANEL, MAX_PANEL, clampPanelWidth };

@@ -16,6 +16,8 @@ interface MathBuild {
   covered: Array<{ from: number; to: number }>;
   hidden: number[];
   lineClasses: Map<number, Set<string>>;
+  /** Optional gutter labels, keyed by the block's first source line. */
+  labels?: Map<number, string>;
 }
 
 let katexLoader: Promise<typeof import("katex").default> | null = null;
@@ -31,22 +33,40 @@ class MathWidget extends WidgetType {
   constructor(
     readonly tex: string,
     readonly display: boolean,
+    readonly from: number,
+    readonly to: number,
   ) {
     super();
   }
 
   eq(other: MathWidget) {
-    return this.tex === other.tex && this.display === other.display;
+    return (
+      this.tex === other.tex &&
+      this.display === other.display &&
+      this.from === other.from &&
+      this.to === other.to
+    );
   }
 
   get estimatedHeight() {
     return this.display ? 56 : -1;
   }
 
-  toDOM() {
+  toDOM(view: EditorView) {
     const el = document.createElement(this.display ? "div" : "span");
     el.className = this.display ? "cm-md-math cm-md-math-block" : "cm-md-math";
     el.textContent = this.tex;
+    // Clicking the rendered formula puts the caret inside the source. The
+    // decoration is then dropped by `rangeHasCursor`, so the TeX shows up and
+    // can be edited in place instead of only from the edges of the range.
+    el.addEventListener("mousedown", (event) => {
+      if (!(event instanceof MouseEvent) || event.button !== 0) return;
+      event.preventDefault();
+      event.stopPropagation();
+      const anchor = Math.min(this.from + 1, this.to);
+      view.dispatch({ selection: { anchor } });
+      view.focus();
+    });
     const tex = this.tex.slice(0, MAX_TEX);
     const display = this.display;
     void loadKatex()
@@ -68,6 +88,19 @@ class MathWidget extends WidgetType {
 function rangeHasCursor(view: EditorView, from: number, to: number) {
   for (const range of view.state.selection.ranges) {
     if (range.head >= from && range.head <= to) return true;
+  }
+  return false;
+}
+
+/**
+ * Strictly inside: a caret parked on the outer edges of a display formula is
+ * "next to it", not "editing it". With an inclusive test, a formula that ends
+ * the document could never render, because the caret always rests on the last
+ * character.
+ */
+function cursorStrictlyInside(view: EditorView, from: number, to: number) {
+  for (const range of view.state.selection.ranges) {
+    if (range.head > from && range.head < to) return true;
   }
   return false;
 }
@@ -106,7 +139,7 @@ class Collapse extends WidgetType {
 const collapse = new Collapse();
 
 function hideMath(build: MathBuild, from: number, to: number, tex: string, display: boolean) {
-  const deco = Decoration.replace({ widget: new MathWidget(tex, display) }).range(from, to);
+  const deco = Decoration.replace({ widget: new MathWidget(tex, display, from, to) }).range(from, to);
   build.decos.push(deco);
   build.atomic.push(deco);
   build.covered.push({ from, to });
@@ -201,7 +234,7 @@ export function decorateMath(
     const single = /^ {0,3}\$\$(.+)\$\$\s*$/.exec(line.text);
     if (single && line.to >= viewportFrom && line.from <= viewportTo) {
       const tex = single[1].trim();
-      if (tex && !rangeHasCursor(view, line.from, line.to)) {
+      if (tex && !cursorStrictlyInside(view, line.from, line.to)) {
         hideMath(build, line.from, line.to, tex, true);
       }
       n += 1;
@@ -218,17 +251,30 @@ export function decorateMath(
       }
       if (close > 0) {
         const blockFrom = line.from;
-        const blockTo = doc.line(close).to;
+        const closing = doc.line(close);
+        const blockTo = closing.to;
         const overlaps = blockTo >= viewportFrom && blockFrom <= viewportTo;
-        if (overlaps && !rangeHasCursor(view, blockFrom, blockTo)) {
-          const tex = doc.sliceString(doc.line(n + 1).from, doc.line(close).from).replace(/\n$/, "");
+        // The closing fence is deliberately NOT part of the "being edited"
+        // range. A document that ends with `$$` leaves the caret at exactly
+        // blockTo, and including that position made the block render never.
+        const bodyEnd = close > n + 1 ? doc.line(close - 1).to : line.to;
+        if (overlaps && !rangeHasCursor(view, blockFrom, bodyEnd)) {
+          const tex = doc.sliceString(doc.line(n + 1).from, closing.from).replace(/\n$/, "");
           if (tex.length <= MAX_TEX) {
             hideMath(build, line.from, line.to, tex, true);
-            for (let j = n + 1; j <= close; j += 1) {
+            for (let j = n + 1; j < close; j += 1) {
               const extra = doc.line(j);
               sinkLine(build, j, extra.from, extra.to);
             }
+            if (rangeHasCursor(view, closing.from, closing.to)) {
+              // Keep the line box so the caret is never stranded in a
+              // zero-height line, but hide the fence text itself.
+              build.decos.push(Decoration.replace({}).range(closing.from, closing.to));
+            } else {
+              sinkLine(build, close, closing.from, closing.to);
+            }
             build.covered.push({ from: blockFrom, to: blockTo });
+            build.labels?.set(line.from, `${n}–${close}`);
           }
         }
         n = close + 1;

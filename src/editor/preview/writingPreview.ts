@@ -473,6 +473,8 @@ class WritingPreviewPlugin {
 
   private onMenuKey(event: KeyboardEvent) {
     if (!this.menuOpen) return;
+    // Never steal keys the IME needs to commit a composition (CJK input).
+    if (event.isComposing || event.keyCode === 229) return;
     if (event.key === "ArrowDown" || event.key === "ArrowUp") {
       event.preventDefault();
       event.stopPropagation();

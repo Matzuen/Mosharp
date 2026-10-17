@@ -1,6 +1,7 @@
 import { invoke, isTauri } from "@tauri-apps/api/core";
 import html2canvas from "html2canvas";
 import { save } from "@tauri-apps/plugin-dialog";
+import { readImageDataUri } from "../api/files";
 import {
   articleCss,
   prepareBody,
@@ -111,6 +112,9 @@ async function exportHtml(request: ExportRequest, colors: ThemeColors) {
   const holder = document.createElement("div");
   holder.innerHTML = article.html;
   await paintDiagrams(holder, article.diagrams, colors);
+  // The saved file lives wherever the dialog points, so relative image paths
+  // would break: embed the bytes instead.
+  await inlineImages(holder, request.docPath);
   const css = articleCss(colors, request.contentWidth);
   const html = standaloneHtml(request.title, holder.innerHTML, css);
   const name = fileStem(request.title) + ".html";
@@ -133,7 +137,10 @@ async function exportWord(request: ExportRequest) {
   }
   const pictures = [];
   for (const href of pictureHrefs(prepared.tokens)) {
-    pictures.push(await dataImageToPng(href));
+    // Local images are read into a data URI first; otherwise Word only ever
+    // embedded inline data: images and real documents lost every picture.
+    const resolved = (await resolveImage(href, request.docPath)) ?? href;
+    pictures.push(await dataImageToPng(resolved));
   }
   const bytes = markdownToDocx(request.markdown, pngs, pictures);
   const name = fileStem(request.title) + ".docx";
@@ -156,9 +163,18 @@ async function exportPng(request: ExportRequest, colors: ThemeColors) {
   const article = renderDocument(request.markdown);
   const width = request.contentWidth;
   const pageHeight = Math.max(900, Math.round(width * 1.35));
+  const name = fileStem(request.title) + ".png";
+  const desktop = request.desktop && isTauri();
+  // Ask for the destination first: rendering thousands of pages and then
+  // throwing them away on "cancel" is wasted work.
+  const chosen = desktop ? await choosePath(request.labels.png, name, "png", "PNG") : null;
+  if (desktop && !chosen) return;
   const host = mountHost(`<article class="mosharp-doc">${article.html}</article>`, colors, width);
   try {
     await paintDiagrams(host, article.diagrams, colors);
+    // html2canvas cannot read the asset protocol (different origin), so embed
+    // the bytes before capture or every screenshot becomes a blank gap.
+    await inlineImages(host, request.docPath);
     await rewriteImages(host, request.docPath);
     await waitForPaint(host);
     const column = host.querySelector(".mosharp-doc");
@@ -178,12 +194,9 @@ async function exportPng(request: ExportRequest, colors: ThemeColors) {
       });
       pages.push(await canvasToPng(canvas));
     }
-    const name = fileStem(request.title) + ".png";
-    if (request.desktop && isTauri()) {
-      const path = await choosePath(request.labels.png, name, "png", "PNG");
-      if (!path) return;
+    if (chosen) {
       for (let index = 0; index < pages.length; index += 1) {
-        await writeBytes(numberedExportName(path, index, pages.length), pages[index]);
+        await writeBytes(numberedExportName(chosen, index, pages.length), pages[index]);
       }
     } else {
       pages.forEach((bytes, index) => {
@@ -293,6 +306,55 @@ async function rewriteImages(root: ParentNode, docPath: string | null) {
     if (!src || /^(https?:|data:|blob:|asset:|tauri:)/i.test(src)) continue;
     const absolute = /^[a-zA-Z]:[\\/]|^\//.test(src) ? src : `${dir}/${src}`;
     img.src = convertFileSrc(absolute);
+  }
+}
+
+const imageCache = new Map<string, string>();
+
+function isAbsolutePath(src: string): boolean {
+  return /^[a-zA-Z]:[\\/]|^\\\\|^\//.test(src);
+}
+
+/**
+ * Resolve one Markdown image href into a `data:` URI that travels with the
+ * exported file. Remote URLs are left alone; local paths are read through the
+ * backend so HTML/Word/PNG output does not depend on a sibling `assets` folder.
+ */
+async function resolveImage(href: string, docPath: string | null): Promise<string | null> {
+  if (!isTauri()) return null;
+  const src = href.trim();
+  if (!src) return null;
+  if (/^(data:|blob:|https?:|asset:|tauri:)/i.test(src)) return null;
+  let path = src;
+  if (src.startsWith("file://")) {
+    try {
+      path = decodeURIComponent(src.slice(7));
+    } catch {
+      return null;
+    }
+  } else if (!isAbsolutePath(src)) {
+    const dir = docPath ? docPath.replace(/[\\/][^\\/]*$/, "") : "";
+    if (!dir) return null;
+    path = `${dir}/${src.replace(/^\.\//, "")}`;
+  }
+  const cached = imageCache.get(path);
+  if (cached) return cached;
+  try {
+    const data = await readImageDataUri(path);
+    imageCache.set(path, data);
+    return data;
+  } catch {
+    return null;
+  }
+}
+
+/** Replace every local `<img src>` with an embeddable data URI. */
+async function inlineImages(root: ParentNode, docPath: string | null): Promise<void> {
+  if (!isTauri()) return;
+  for (const img of root.querySelectorAll("img")) {
+    const src = img.getAttribute("src") ?? "";
+    const data = await resolveImage(src, docPath);
+    if (data) img.setAttribute("src", data);
   }
 }
 

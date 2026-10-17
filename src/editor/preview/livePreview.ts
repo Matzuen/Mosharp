@@ -1,6 +1,6 @@
 import type { SyntaxNode } from "@lezer/common";
 import { syntaxTree } from "@codemirror/language";
-import { RangeSet, StateEffect, StateField, type Range } from "@codemirror/state";
+import { RangeSet, StateEffect, StateField, type Range, type Text } from "@codemirror/state";
 import {
   Decoration,
   EditorView,
@@ -17,6 +17,25 @@ import { decorateMath } from "./math";
 import { DiagramWidget } from "./diagramFence";
 import { diagramKind } from "./diagramKind";
 import { focusModeField, sourceModeField } from "./modes";
+import { quoteDepth } from "./quoteDepth";
+import {
+  alignment,
+  applyTableOp,
+  isDelimiterRow,
+  splitCells,
+  TABLE_MENU,
+  TABLE_MENU_KEYS,
+  type TableOp,
+} from "./tableOps";
+
+/** Shared attributes for the small inline toolbar icons. */
+const ICON_ATTRS =
+  'viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"';
+
+const ICON_ALIGN_LEFT = `<svg ${ICON_ATTRS}><path d="M2 4h12M2 8h8M2 12h12"/></svg>`;
+const ICON_ALIGN_CENTER = `<svg ${ICON_ATTRS}><path d="M2 4h12M4 8h8M2 12h12"/></svg>`;
+const ICON_ALIGN_RIGHT = `<svg ${ICON_ATTRS}><path d="M2 4h12M6 8h8M2 12h12"/></svg>`;
+const ICON_TRASH = `<svg ${ICON_ATTRS}><path d="M2.5 4.5h11M6 4.5V3h4v1.5M4.5 4.5l.6 8.5h5.8l.6-8.5M6.7 7v4M9.3 7v4"/></svg>`;
 
 /** Docs at/above this line count: decorate only after scroll settles. */
 const LARGE_DOC_LINES = 8_000;
@@ -131,6 +150,11 @@ const collapseWidget = new CollapseWidget();
 
 class TableWidget extends WidgetType {
   dom: HTMLElement | null = null;
+  /** Visual cell the last interaction happened in; row 0 is the header. */
+  private activeRow = 0;
+  private activeCol = 0;
+  /** Lets `destroy` drop the document listeners of an open menu. */
+  private closeMenu: (() => void) | null = null;
 
   constructor(
     readonly source: string,
@@ -163,42 +187,182 @@ class TableWidget extends WidgetType {
       const pos = this.from;
       queueMicrotask(() => commitCell(view, pos, row, col, text));
     };
+    const activateAt = (row: number, col: number) => {
+      this.activeRow = row;
+      this.activeCol = col;
+    };
 
     const thead = document.createElement("thead");
-    thead.appendChild(renderRow(header, aligns, "th", 0, commitAt));
+    thead.appendChild(renderRow(header, aligns, "th", 0, commitAt, activateAt));
     table.appendChild(thead);
 
     const tbody = document.createElement("tbody");
     let visualRow = 1;
     for (let i = bodyStart; i < lines.length; i += 1) {
       if (isDelimiterRow(lines[i])) continue;
-      tbody.appendChild(renderRow(splitCells(lines[i]), aligns, "td", visualRow, commitAt));
+      tbody.appendChild(
+        renderRow(splitCells(lines[i]), aligns, "td", visualRow, commitAt, activateAt),
+      );
       visualRow += 1;
     }
     table.appendChild(tbody);
-    const chrome = document.createElement("div");
-    chrome.className = "cm-md-table-chrome";
-    const actions: Array<[string, TableOp]> = [
-      ["加一行", "add-row"],
-      ["删一行", "del-row"],
-      ["加一列", "add-col"],
-      ["删一列", "del-col"],
-    ];
-    for (const [label, op] of actions) {
+
+    // Inline SVG rather than an icon font: the reference UI renders glyphs as
+    // tofu boxes when the font lacks them, and a missing icon is worse than no
+    // icon.
+    const iconButton = (className: string, svg: string, title: string) => {
       const button = document.createElement("button");
       button.type = "button";
-      button.className = "cm-md-table-op";
-      button.textContent = label;
+      button.className = className;
+      button.title = title;
+      button.setAttribute("aria-label", title);
+      button.innerHTML = svg;
       button.addEventListener("mousedown", (event) => {
         event.preventDefault();
         event.stopPropagation();
-        const pos = view.posAtDOM(wrap);
-        if (pos == null) return;
-        queueMicrotask(() => mutateTable(view, pos, op));
       });
-      chrome.appendChild(button);
+      return button;
+    };
+
+    const left = document.createElement("div");
+    left.className = "cm-md-table-left";
+    const alignments: Array<[string, TableOp, string]> = [
+      [ICON_ALIGN_LEFT, "align-left", "本列左对齐"],
+      [ICON_ALIGN_CENTER, "align-center", "本列居中"],
+      [ICON_ALIGN_RIGHT, "align-right", "本列右对齐"],
+    ];
+    for (const [svg, op, title] of alignments) {
+      const button = iconButton("cm-md-table-align", svg, title);
+      button.addEventListener("click", () => run(op));
+      left.appendChild(button);
     }
-    wrap.append(table, chrome);
+
+    const chrome = document.createElement("div");
+    chrome.className = "cm-md-table-chrome";
+    const more = document.createElement("button");
+    more.type = "button";
+    more.className = "cm-md-table-more";
+    more.title = "更多操作";
+    more.textContent = "更多操作 ⋮";
+    chrome.appendChild(more);
+
+    const removeTable = iconButton("cm-md-table-action", ICON_TRASH, "删除整个表格");
+    removeTable.addEventListener("click", () => run("delete"));
+    chrome.appendChild(removeTable);
+
+    const menu = document.createElement("div");
+    menu.className = "cm-md-table-menu";
+    menu.style.display = "none";
+
+    const closeMenu = () => {
+      menu.style.display = "none";
+      wrap.classList.remove("cm-md-table-open");
+      window.removeEventListener("keydown", onEscape, true);
+      document.removeEventListener("mousedown", onOutside, true);
+    };
+    // Escape closes the menu. Capture on window so it runs before the cell's own
+    // keydown handler (which stops propagation on every key).
+    const onEscape = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      event.stopPropagation();
+      closeMenu();
+    };
+    const onOutside = (event: MouseEvent) => {
+      if (event.target instanceof Node && wrap.contains(event.target)) return;
+      closeMenu();
+    };
+    const openMenu = () => {
+      menu.style.display = "block";
+      wrap.classList.add("cm-md-table-open");
+      window.addEventListener("keydown", onEscape, true);
+      document.addEventListener("mousedown", onOutside, true);
+    };
+    this.closeMenu = closeMenu;
+    const run = (op: TableOp) => {
+      closeMenu();
+      // Capture the coordinates before the widget is rebuilt.
+      const row = this.activeRow;
+      const col = this.activeCol;
+      const pos = view.posAtDOM(wrap);
+      if (pos == null) return;
+      // `eq` keeps the current DOM alive while a cell holds focus (so typing in
+      // a cell is not interrupted by its own commit). A structural change would
+      // then leave the old table on screen even though the document changed —
+      // the click looked like a no-op and had to be repeated. Drop the DOM
+      // reference so the next comparison forces a rebuild, and put it back if
+      // the operation turned out to be a no-op.
+      const previousDom = this.dom;
+      this.dom = null;
+      queueMicrotask(() => {
+        if (!runTableOp(view, pos, op, row, col)) this.dom = previousDom;
+      });
+    };
+
+    for (const entry of TABLE_MENU) {
+      if (entry.sep) {
+        const rule = document.createElement("hr");
+        rule.className = "cm-md-table-menu-sep";
+        menu.appendChild(rule);
+        continue;
+      }
+      const item = document.createElement("button");
+      item.type = "button";
+      item.className = "cm-md-table-menu-item";
+      const label = document.createElement("span");
+      label.textContent = entry.label ?? "";
+      item.appendChild(label);
+      if (entry.keys) {
+        const keys = document.createElement("span");
+        keys.className = "cm-md-table-menu-keys";
+        keys.textContent = entry.keys;
+        item.appendChild(keys);
+      }
+      item.addEventListener("mousedown", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+      });
+      item.addEventListener("click", () => {
+        if (entry.op) run(entry.op);
+      });
+      menu.appendChild(item);
+    }
+
+    more.addEventListener("mousedown", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+    });
+    more.addEventListener("click", () => {
+      const open = menu.style.display === "block";
+      if (open) closeMenu();
+      else openMenu();
+    });
+
+    // Ctrl+Enter and Alt+Arrow are advertised in the menu, so wire them up.
+    // Capture phase: the cell handler below stops propagation on every key.
+    wrap.addEventListener(
+      "keydown",
+      (event) => {
+        const target = event.target;
+        if (!(target instanceof HTMLElement) || !target.classList.contains("cm-md-cell")) return;
+        if (event.ctrlKey && event.key === "Enter") {
+          event.preventDefault();
+          event.stopPropagation();
+          run("row-below");
+          return;
+        }
+        if (!event.altKey) return;
+        const op = TABLE_MENU_KEYS[event.key];
+        if (!op) return;
+        event.preventDefault();
+        event.stopPropagation();
+        run(op);
+      },
+      true,
+    );
+
+    chrome.appendChild(menu);
+    wrap.append(table, left, chrome);
     this.dom = wrap;
     return wrap;
   }
@@ -206,26 +370,12 @@ class TableWidget extends WidgetType {
   ignoreEvent() {
     return true;
   }
-}
 
-function splitCells(line: string): string[] {
-  let text = line.trim();
-  if (text.startsWith("|")) text = text.slice(1);
-  if (text.endsWith("|")) text = text.slice(0, -1);
-  return text.split("|").map((cell) => cell.trim());
-}
-
-function isDelimiterRow(line: string): boolean {
-  const cells = splitCells(line);
-  return cells.length > 0 && cells.every((cell) => /^:?-+:?$/.test(cell));
-}
-
-function alignment(cell: string): "left" | "center" | "right" {
-  const left = cell.startsWith(":");
-  const right = cell.endsWith(":");
-  if (left && right) return "center";
-  if (right) return "right";
-  return "left";
+  destroy() {
+    // The widget can be scrolled out / rebuilt while its menu is open.
+    this.closeMenu?.();
+    this.closeMenu = null;
+  }
 }
 
 function renderRow(
@@ -234,16 +384,22 @@ function renderRow(
   tag: "th" | "td",
   visualRow: number,
   onCommit: (row: number, col: number, text: string) => void,
+  onActivate: (row: number, col: number) => void,
 ) {
   const row = document.createElement("tr");
   for (let i = 0; i < cells.length; i += 1) {
     const cell = document.createElement(tag);
     const original = cells[i];
+    cell.className = "cm-md-cell";
     cell.textContent = original;
     cell.contentEditable = "true";
     cell.spellcheck = false;
     cell.style.textAlign = aligns[i] ?? "left";
-    cell.addEventListener("mousedown", (event) => event.stopPropagation());
+    cell.addEventListener("mousedown", (event) => {
+      event.stopPropagation();
+      onActivate(visualRow, i);
+    });
+    cell.addEventListener("focusin", () => onActivate(visualRow, i));
     const commit = () => {
       const next = (cell.textContent ?? "").replace(/\n/g, " ").replace(/\|/g, "").trim();
       if (next !== original) onCommit(visualRow, i, next);
@@ -262,8 +418,6 @@ function renderRow(
   return row;
 }
 
-type TableOp = "add-row" | "del-row" | "add-col" | "del-col";
-
 function tableLinesAt(view: EditorView, pos: number) {
   const lines: Array<{ from: number; to: number; text: string }> = [];
   let lineNo = view.state.doc.lineAt(pos).number;
@@ -277,41 +431,47 @@ function tableLinesAt(view: EditorView, pos: number) {
   return lines;
 }
 
-function joinCells(cells: string[]) {
-  return `| ${cells.join(" | ")} |`;
-}
-
-function mutateTable(view: EditorView, pos: number, op: TableOp) {
+/**
+ * Apply one table operation to the source text that backs the widget.
+ *
+ * `activeRow`/`activeCol` are visual coordinates inside the widget: row 0 is the
+ * header, rows 1+ are body rows. They are mapped back to source line indexes
+ * because the delimiter row is not a visual row.
+ */
+/** Returns true when the document was actually rewritten. */
+function runTableOp(
+  view: EditorView,
+  pos: number,
+  op: TableOp,
+  activeRow: number,
+  activeCol: number,
+): boolean {
   const lines = tableLinesAt(view, pos);
-  if (lines.length === 0) return;
-  const rows = lines.map((line) => line.text);
-  const hasDelimiter = rows[1] != null && isDelimiterRow(rows[1]);
-  const cols = Math.max(1, splitCells(rows[0]).length);
-  let next: string[] | null = null;
-  if (op === "add-row") {
-    next = [...rows, joinCells(Array.from({ length: cols }, () => " "))];
-  } else if (op === "del-row") {
-    const bodyStart = hasDelimiter ? 2 : 1;
-    if (rows.length > bodyStart) next = rows.slice(0, -1);
-  } else if (op === "add-col") {
-    next = rows.map((row) => {
-      const cells = splitCells(row);
-      cells.push(isDelimiterRow(row) ? "---" : " ");
-      return joinCells(cells);
-    });
-  } else if (cols > 1) {
-    next = rows.map((row) => {
-      const cells = splitCells(row);
-      cells.pop();
-      return joinCells(cells);
-    });
+  if (lines.length === 0) return false;
+  const tableFrom = lines[0].from;
+  const tableTo = lines[lines.length - 1].to;
+
+  if (op === "copy") {
+    const text = view.state.doc.sliceString(tableFrom, tableTo);
+    void navigator.clipboard?.writeText(text).catch(() => {});
+    return false;
   }
-  if (!next) return;
-  const insert = next.join("\n");
-  const from = lines[0].from;
-  const to = lines[lines.length - 1].to;
-  if (insert === view.state.doc.sliceString(from, to)) return;
-  view.dispatch({ changes: { from, to, insert } });
+
+  if (op === "delete") {
+    let from = tableFrom;
+    let to = tableTo;
+    // Take the following newline with it so no empty line is left behind.
+    if (to < view.state.doc.length) to += 1;
+    else if (from > 0) from -= 1;
+    view.dispatch({ changes: { from, to, insert: "" } });
+    return true;
+  }
+
+  const source = lines.map((line) => line.text).join("\n");
+  const insert = applyTableOp(source, op, activeRow, activeCol);
+  if (insert == null) return false;
+  view.dispatch({ changes: { from: tableFrom, to: tableTo, insert } });
+  return true;
 }
 
 function commitCell(view: EditorView, pos: number, visualRow: number, col: number, text: string) {
@@ -357,6 +517,28 @@ class HiddenLineNumber extends GutterMarker {
   }
 }
 
+/**
+ * Gutter label for a block that swallows several source lines (setext headings,
+ * tables, diagram fences, `$$` blocks).
+ *
+ * The alternate — blanking the digits of the swallowed lines — leaves holes in
+ * the number column (1576, then 1578), which reads as a misaligned gutter.
+ * Showing the source range keeps every line accounted for.
+ */
+class SpanLabel extends GutterMarker {
+  constructor(readonly label: string) {
+    super();
+  }
+
+  eq(other: SpanLabel) {
+    return other.label === this.label;
+  }
+
+  toDOM() {
+    return document.createTextNode(this.label);
+  }
+}
+
 const hiddenLineNumber = new HiddenLineNumber();
 const setHiddenLineNumbers = StateEffect.define<RangeSet<GutterMarker>>();
 
@@ -384,6 +566,8 @@ interface PreviewBuild {
   lineClasses: Map<number, Set<string>>;
   covered: Array<{ from: number; to: number }>;
   hidden: number[];
+  /** Gutter labels keyed by the position of the block's first source line. */
+  labels: Map<number, string>;
 }
 
 function isCovered(build: PreviewBuild, from: number, to: number) {
@@ -459,7 +643,17 @@ function decorateRange(
       if (name === "Blockquote") {
         const start = view.state.doc.lineAt(node.from).number;
         const end = view.state.doc.lineAt(Math.max(node.from, node.to - 1)).number;
-        for (let n = start; n <= end; n += 1) addLineClass(build, n, "cm-md-quote");
+        // Lazy continuation lines carry no `>` of their own, so fall back to the
+        // depth of the block's first line.
+        const blockDepth = quoteDepth(view.state.doc.line(start).text);
+        for (let n = start; n <= end; n += 1) {
+          const depth = quoteDepth(view.state.doc.line(n).text) || blockDepth;
+          addLineClass(
+            build,
+            n,
+            depth >= 2 ? `cm-md-quote cm-md-quote-${Math.min(depth, 6)}` : "cm-md-quote",
+          );
+        }
       }
 
       if (name === "FencedCode" || name === "IndentedCode") {
@@ -484,6 +678,7 @@ function decorateRange(
             build.hidden.push(line.from);
           }
           build.covered.push({ from: start.from, to: end.to });
+          spanLabel(build, view.state.doc, start.number, end.number);
           return false;
         }
         for (let n = start.number; n <= end.number; n += 1) {
@@ -519,6 +714,7 @@ function decorateRange(
           build.hidden.push(line.from);
         }
         build.covered.push({ from: start.from, to: end.to });
+        spanLabel(build, view.state.doc, start.number, end.number);
         return false;
       }
 
@@ -542,6 +738,9 @@ function decorateRange(
             build.atomic.push(deco);
             addLineClass(build, line.number, "cm-md-sink");
             build.hidden.push(line.from);
+            // A setext heading eats its underline line; label the text line
+            // with the whole source span so the gutter has no hole.
+            spanLabel(build, view.state.doc, line.number - 1, line.number);
           }
         } else {
           let end = node.to;
@@ -594,7 +793,9 @@ function decorateRange(
       if (name === "StrongEmphasis") {
         markSpan(build, node.from, node.to, "cm-md-strong");
       }
-      if (name === "Emphasis" && node.node.parent?.name !== "StrongEmphasis") {
+      if (name === "Emphasis") {
+        // `***text***` is a StrongEmphasis wrapping an Emphasis; it must get
+        // both marks, otherwise bold-italic rendered as plain bold.
         markSpan(build, node.from, node.to, "cm-md-em");
       }
       if (name === "Strikethrough") {
@@ -654,13 +855,22 @@ function decorateRange(
   }
 }
 
-function hiddenMarkers(positions: number[]): RangeSet<GutterMarker> {
-  if (positions.length === 0) return RangeSet.empty;
-  const unique = [...new Set(positions)].sort((a, b) => a - b);
-  return RangeSet.of(
-    unique.map((from) => hiddenLineNumber.range(from)),
-    true,
-  );
+function gutterMarkers(build: PreviewBuild): RangeSet<GutterMarker> {  const ranges: Range<GutterMarker>[] = [];
+  for (const [from, label] of build.labels) {
+    ranges.push(new SpanLabel(label).range(from));
+  }
+  for (const from of new Set(build.hidden)) {
+    if (build.labels.has(from)) continue;
+    ranges.push(hiddenLineNumber.range(from));
+  }
+  if (ranges.length === 0) return RangeSet.empty;
+  return RangeSet.of(ranges, true);
+}
+
+/** Record the source-line range of a collapsed block on its first line. */
+function spanLabel(build: PreviewBuild, doc: Text, firstLine: number, lastLine: number) {
+  if (lastLine <= firstLine || firstLine < 1) return;
+  build.labels.set(doc.line(firstLine).from, `${firstLine}–${lastLine}`);
 }
 
 const emptyPreview = {
@@ -684,6 +894,7 @@ function buildDecorations(view: EditorView): {
     lineClasses: new Map(),
     covered: [],
     hidden: [],
+    labels: new Map(),
   };
 
   for (const range of view.visibleRanges) {
@@ -700,7 +911,7 @@ function buildDecorations(view: EditorView): {
     return {
       decorations: Decoration.set(build.decos, true),
       atomic: Decoration.set(build.atomic, true),
-      hidden: hiddenMarkers(build.hidden),
+      hidden: gutterMarkers(build),
     };
   } catch (error) {
     console.error("live preview decorations skipped", error);
@@ -848,6 +1059,10 @@ export const livePreviewPlugin = ViewPlugin.fromClass(
   },
 );
 
+/** Inner quote bars, one per 12px period; the outermost bar is the border. */
+const QUOTE_BARS =
+  "repeating-linear-gradient(to right, var(--quote-border) 0 3px, transparent 3px 12px)";
+
 export const livePreviewTheme = EditorView.baseTheme({
   ".cm-md-heading": { fontWeight: "700", lineHeight: "1.35" },
   ".cm-md-ATXHeading1, .cm-md-SetextHeading1": {
@@ -867,7 +1082,12 @@ export const livePreviewTheme = EditorView.baseTheme({
     fontSize: "var(--h4-size)",
   },
   ".cm-md-strong": { color: "var(--strong)", fontWeight: "700" },
+  // CJK text has no true italic face, so `italic` falls back to a ~14deg
+  // synthetic slant that reads as barely slanted. Ask for a stronger angle; if
+  // `oblique <angle>` is unsupported the declaration is dropped at parse time
+  // and the plain `italic` above still applies.
   ".cm-md-em": { color: "var(--em)", fontStyle: "italic" },
+  ".cm-md-em.cm-md-em": { fontStyle: "oblique 20deg" },
   ".cm-md-strike": { textDecoration: "line-through", color: "var(--muted)" },
   ".cm-md-highlight": {
     backgroundColor: "var(--highlight)",
@@ -893,6 +1113,43 @@ export const livePreviewTheme = EditorView.baseTheme({
     color: "var(--quote)",
     borderLeft: "3px solid var(--quote-border)",
     paddingLeft: "12px",
+  },
+  // One bar per nesting level: the border is the outermost bar and the gradient
+  // tile draws the inner ones, so `> > a` no longer looks like `> a`.
+  ".cm-md-quote-2": {
+    paddingLeft: "24px",
+    backgroundImage: QUOTE_BARS,
+    backgroundSize: "12px 100%",
+    backgroundPosition: "12px 0",
+    backgroundRepeat: "no-repeat",
+  },
+  ".cm-md-quote-3": {
+    paddingLeft: "36px",
+    backgroundImage: QUOTE_BARS,
+    backgroundSize: "24px 100%",
+    backgroundPosition: "12px 0",
+    backgroundRepeat: "no-repeat",
+  },
+  ".cm-md-quote-4": {
+    paddingLeft: "48px",
+    backgroundImage: QUOTE_BARS,
+    backgroundSize: "36px 100%",
+    backgroundPosition: "12px 0",
+    backgroundRepeat: "no-repeat",
+  },
+  ".cm-md-quote-5": {
+    paddingLeft: "60px",
+    backgroundImage: QUOTE_BARS,
+    backgroundSize: "48px 100%",
+    backgroundPosition: "12px 0",
+    backgroundRepeat: "no-repeat",
+  },
+  ".cm-md-quote-6": {
+    paddingLeft: "72px",
+    backgroundImage: QUOTE_BARS,
+    backgroundSize: "60px 100%",
+    backgroundPosition: "12px 0",
+    backgroundRepeat: "no-repeat",
   },
   ".cm-md-codeblock": {
     backgroundColor: "var(--code-block)",
@@ -1046,24 +1303,99 @@ export const livePreviewTheme = EditorView.baseTheme({
     display: "inline-block",
     width: "100%",
     verticalAlign: "top",
+    // Anchor for the floating toolbar.
+    position: "relative",
   },
-  ".cm-md-table-chrome": {
+  // Both toolbars float above the block instead of taking part in the layout:
+  // an in-flow bar made the whole table grow the moment the caret entered it,
+  // shifting everything below.
+  ".cm-md-table-left, .cm-md-table-chrome": {
     display: "none",
+    position: "absolute",
+    top: "0",
+    // Sit entirely above the table rather than straddling its top border.
+    transform: "translateY(-100%)",
+    // Hover bridge: keeps the toolbar reachable across the gap between the
+    // buttons and the table's top edge (it is part of the wrap's box).
+    paddingBottom: "4px",
+    zIndex: "14",
     gap: "4px",
-    marginTop: "4px",
+    alignItems: "center",
   },
-  ".cm-md-table-wrap:hover .cm-md-table-chrome, .cm-md-table-wrap:focus-within .cm-md-table-chrome": {
-    display: "flex",
+  ".cm-md-table-left": { left: "0" },
+  ".cm-md-table-chrome": { right: "8px" },
+  ".cm-md-table-wrap:hover .cm-md-table-left, .cm-md-table-wrap:focus-within .cm-md-table-left, .cm-md-table-wrap.cm-md-table-open .cm-md-table-left, .cm-md-table-wrap:hover .cm-md-table-chrome, .cm-md-table-wrap:focus-within .cm-md-table-chrome, .cm-md-table-wrap.cm-md-table-open .cm-md-table-chrome":
+    {
+      display: "flex",
+    },
+  ".cm-md-table-align, .cm-md-table-action": {
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    width: "26px",
+    height: "24px",
+    padding: "0",
+    border: "1px solid var(--line)",
+    borderRadius: "6px",
+    background: "var(--menu)",
+    color: "var(--muted)",
+    cursor: "pointer",
+    whiteSpace: "nowrap",
+    boxShadow: "0 2px 8px rgba(28,25,23,0.10)",
   },
-  ".cm-md-table-op": {
-    height: "26px",
+  ".cm-md-table-align svg, .cm-md-table-action svg": { display: "block" },
+  ".cm-md-table-align:hover, .cm-md-table-action:hover, .cm-md-table-more:hover": {
+    color: "var(--ink)",
+    background: "var(--hover)",
+  },
+  ".cm-md-table-more": {
+    height: "24px",
     padding: "0 8px",
     border: "1px solid var(--line)",
     borderRadius: "6px",
     background: "var(--menu)",
-    color: "var(--ink)",
+    color: "var(--muted)",
     cursor: "pointer",
+    fontSize: "11px",
+    whiteSpace: "nowrap",
+    boxShadow: "0 2px 8px rgba(28,25,23,0.10)",
+  },
+  ".cm-md-table-menu": {
+    position: "absolute",
+    top: "100%",
+    right: "0",
+    marginTop: "2px",
+    minWidth: "216px",
+    padding: "4px",
+    border: "1px solid var(--line)",
+    borderRadius: "8px",
+    background: "var(--menu)",
+    boxShadow: "0 10px 24px rgba(28,25,23,0.16)",
+    zIndex: "15",
+  },
+  ".cm-md-table-menu-item": {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: "16px",
+    width: "100%",
+    height: "28px",
+    padding: "0 8px",
+    border: "none",
+    borderRadius: "5px",
+    background: "transparent",
+    color: "var(--ink)",
     fontSize: "12px",
+    textAlign: "left",
+    cursor: "pointer",
+    whiteSpace: "nowrap",
+  },
+  ".cm-md-table-menu-item:hover": { background: "var(--hover)" },
+  ".cm-md-table-menu-keys": { color: "var(--faint)", fontSize: "11px" },
+  ".cm-md-table-menu-sep": {
+    border: "none",
+    borderTop: "1px solid var(--line)",
+    margin: "4px 2px",
   },
   ".cm-task-checkbox": {
     width: "14px",

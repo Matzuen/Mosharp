@@ -11,6 +11,8 @@ export interface SessionTabSnapshot {
   selection: { anchor: number; head: number };
   lineEnding?: "\n" | "\r\n";
   encoding?: string;
+  /** True when the buffer was too large to snapshot; `content` is empty. */
+  contentDropped?: boolean;
 }
 
 export interface SessionSnapshot {
@@ -25,6 +27,8 @@ const SESSION_KEY = "mosharp.session.v1";
 const MAX_RECENT = 10;
 /** Keep session snapshots small so 10万行基准不会卡死 localStorage。 */
 export const MAX_SESSION_CHARS = 256 * 1024;
+/** Hard ceiling for the whole serialized envelope. */
+const MAX_SESSION_BYTES = 1024 * 1024;
 
 export function loadRecent(): RecentEntry[] {
   try {
@@ -49,7 +53,11 @@ export function pushRecent(path: string, current: RecentEntry[] = loadRecent()):
       (item) => item.path.replace(/\\/g, "/").toLowerCase() !== normalized.replace(/\\/g, "/").toLowerCase(),
     ),
   ].slice(0, MAX_RECENT);
-  localStorage.setItem(RECENT_KEY, JSON.stringify(next));
+  try {
+    localStorage.setItem(RECENT_KEY, JSON.stringify(next));
+  } catch {
+    // Quota failure must never surface as a failed save.
+  }
   return next;
 }
 
@@ -57,8 +65,8 @@ export function loadSession(): SessionSnapshot | null {
   try {
     const raw = localStorage.getItem(SESSION_KEY);
     if (!raw) return null;
-    // Drop previously bloated snapshots that would freeze the UI on parse/restore.
-    if (raw.length > MAX_SESSION_CHARS * 4) {
+    // Last-resort guard for a bloated blob written by an older build.
+    if (raw.length > MAX_SESSION_BYTES) {
       localStorage.removeItem(SESSION_KEY);
       return null;
     }
@@ -72,23 +80,34 @@ export function loadSession(): SessionSnapshot | null {
   }
 }
 
+/**
+ * Persist the session, dropping only the buffers that do not fit.
+ *
+ * Dropping is marked on the tab (`contentDropped`) and `dirty` is left alone so
+ * the restore path can tell the user their unsaved text was not snapshotted
+ * instead of silently reporting the tab as saved.
+ */
 export function saveSession(snapshot: SessionSnapshot): void {
   try {
-    const tabs = snapshot.tabs.map((tab) => {
-      if (tab.content.length > MAX_SESSION_CHARS) {
-        return {
-          ...tab,
-          // Drop huge buffers (benchmark / pasted novels); keep path only.
-          content: tab.path ? "" : "",
-          dirty: false,
-        };
-      }
-      return tab;
-    });
-    localStorage.setItem(
-      SESSION_KEY,
-      JSON.stringify({ ...snapshot, tabs, savedAt: Date.now() }),
+    const tabs: SessionTabSnapshot[] = snapshot.tabs.map((tab) =>
+      tab.content.length > MAX_SESSION_CHARS
+        ? { ...tab, content: "", contentDropped: true }
+        : { ...tab, contentDropped: false },
     );
+    const serialise = () => JSON.stringify({ ...snapshot, tabs, savedAt: Date.now() });
+    let payload = serialise();
+    // Trim largest-first so one huge document cannot evict every other tab.
+    const order = tabs
+      .map((tab, index) => ({ index, size: tab.content.length }))
+      .sort((a, b) => b.size - a.size);
+    for (const entry of order) {
+      if (payload.length <= MAX_SESSION_BYTES) break;
+      const tab = tabs[entry.index];
+      if (!tab.content) continue;
+      tabs[entry.index] = { ...tab, content: "", contentDropped: true };
+      payload = serialise();
+    }
+    localStorage.setItem(SESSION_KEY, payload);
   } catch {
     // Quota or serialization failure — ignore rather than freeze UI.
   }

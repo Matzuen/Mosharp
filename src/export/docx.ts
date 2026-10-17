@@ -243,8 +243,13 @@ function blocksXml(
         const start = list.start || 1;
         list.items.forEach((item, index) => {
           const prefix = item.task ? (item.checked ? "☑ " : "☐ ") : list.ordered ? `${start + index}. ` : "• ";
-          const runs = [{ text: prefix }, ...inlineRuns(item.tokens.flatMap(inlineTokens), slots)];
+          const nested = item.tokens.filter(isNestedBlock);
+          const inline = item.tokens.filter((child) => !isNestedBlock(child));
+          const runs = [{ text: prefix }, ...inlineRuns(inline.flatMap(inlineTokens), slots)];
           xml += paragraph(runs, links);
+          // Sub-lists, code fences, diagrams and tables inside a list item used
+          // to be dropped silently; render them instead of losing the content.
+          if (nested.length) walk(nested);
         });
       } else if (token.type === "table") {
         xml += tableXml(token as Tokens.Table, slots, links);
@@ -260,6 +265,13 @@ function blocksXml(
 function inlineTokens(token: Token): Token[] {
   if (token.type === "paragraph" || token.type === "list_item") return token.tokens ?? [];
   return [token];
+}
+
+/** Block-level children of a list item that need their own paragraph. */
+const NESTED_BLOCKS = new Set(["list", "code", "table", "blockquote", "hr"]);
+
+function isNestedBlock(token: Token): boolean {
+  return NESTED_BLOCKS.has(token.type);
 }
 
 function flattenInline(tokens: Token[]): Token[] {

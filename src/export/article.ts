@@ -2,6 +2,7 @@ import katex from "katex";
 import { marked, type Token, type Tokens, type TokenizerThis } from "marked";
 import { diagramKind, type DiagramKind } from "../editor/preview/diagramKind.ts";
 import { splitFrontmatter, toLineFeed } from "../editor/fidelity.ts";
+import { sanitizeHtml } from "./sanitize.ts";
 
 export interface ThemeColors {
   paper: string;
@@ -214,7 +215,10 @@ function blockHtml(tokens: Token[], slots: MathSlot[], diagrams: DiagramSlot[]):
         html += "<hr>";
         break;
       case "html":
-        html += token.text;
+        // Raw HTML comes from an untrusted document and this output is later
+        // injected into the app window with innerHTML, so it is rebuilt from an
+        // allow-list instead of being passed through.
+        html += sanitizeHtml(token.text);
         break;
       default:
         break;

@@ -4,6 +4,11 @@ use std::time::Duration;
 
 use tauri::{AppHandle, Emitter, Manager, Runtime, State, Window, WindowEvent};
 
+/// How long the webview gets to acknowledge the close prompt before the gate is
+/// released again so the user can retry. The window is never destroyed on
+/// timeout: that would discard unsaved work with no confirmation.
+const WATCHDOG_MS: u64 = 4000;
+
 /// Tracks unsaved work so the window can close without waiting on the webview.
 ///
 /// A JS `onCloseRequested` listener makes Rust call `prevent_close` before the
@@ -49,15 +54,17 @@ pub fn on_window_event<R: Runtime>(window: &Window<R>, event: &WindowEvent) {
 
     let timer_window = window.clone();
     thread::spawn(move || {
-        thread::sleep(Duration::from_millis(2000));
+        thread::sleep(Duration::from_millis(WATCHDOG_MS));
         let win = timer_window.clone();
         let _ = timer_window.run_on_main_thread(move || {
             let gate = win.state::<CloseGate>();
             let still_waiting = gate.waiting.load(Ordering::SeqCst) == token;
             let acked = gate.acked.load(Ordering::SeqCst);
             if still_waiting && !acked {
+                // The webview never picked the prompt up (e.g. its main thread is
+                // busy). Release the gate so a later close attempt is not blocked
+                // forever, but keep the window alive with its unsaved buffers.
                 gate.waiting.store(0, Ordering::SeqCst);
-                let _ = win.destroy();
             }
         });
     });

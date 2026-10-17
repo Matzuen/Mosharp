@@ -78,7 +78,11 @@ function openParagraphMenu(view: EditorView, lineFrom: number, event: MouseEvent
   menu.style.left = `${event.clientX - editorRect.left}px`;
   menu.style.top = `${event.clientY - editorRect.top}px`;
   view.dom.appendChild(menu);
-  const close = () => {
+  const close = (event?: MouseEvent) => {
+    // A mousedown inside the menu must not tear it down. The click event is
+    // only delivered to a target that still exists, so removing the menu here
+    // would make every item a silent no-op.
+    if (event?.target instanceof Node && menu.contains(event.target)) return;
     menu.remove();
     window.removeEventListener("mousedown", close);
   };

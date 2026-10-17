@@ -1,2 +1,46 @@
-node_modules
-dist
+# --- 依赖 ---
+node_modules/
+.pnpm-store/
+
+# --- 构建产物 ---
+dist/
+dist-ssr/
+*.local
+src-tauri/target/
+
+# --- Tauri 生成物 ---
+src-tauri/gen/schemas/
+
+# --- 日志 ---
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# --- 测试与覆盖率 ---
+coverage/
+*.lcov
+
+# --- 临时文件 ---
+.tmp/
+_tmp/
+*.tsbuildinfo
+
+# --- 本地环境变量 ---
+.env
+.env.*
+!.env.example
+
+# --- 编辑器 / 操作系统 ---
+.DS_Store
+Thumbs.db
+desktop.ini
+*.swp
+*.swo
+
+# .vscode/extensions.json 是团队共享的推荐扩展，保持跟踪；
+# 只忽略个人配置，避免把本机设置提交上去。
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json

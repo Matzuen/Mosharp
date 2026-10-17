@@ -65,6 +65,14 @@ export function SettingsDialog(props: {
       }
       const chord = chordFromEvent(event);
       if (!chord) return;
+      // A chord without Ctrl/Alt would also fire while the user types in the
+      // editor, so the recorder refuses it. Duplicates are refused too: the
+      // dispatcher is first-match-wins, so the loser would silently die.
+      if (!/^(Ctrl|Alt)\+/.test(chord)) return;
+      const taken = Object.entries(props.prefs.shortcuts).some(
+        ([key, value]) => key !== id && value === chord,
+      );
+      if (taken) return;
       props.onChange({ shortcuts: { ...props.prefs.shortcuts, [id]: chord } });
       setRecording(null);
     };
@@ -79,6 +87,7 @@ export function SettingsDialog(props: {
       <div
         class={`settings-dialog${recording() ? " recording" : ""}`}
         role="dialog"
+        aria-modal="true"
         aria-label={label("settings")}
         onMouseDown={(event) => event.stopPropagation()}
       >
