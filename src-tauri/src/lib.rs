@@ -1,6 +1,7 @@
 mod close_gate;
 mod document;
 mod export_pdf;
+mod search;
 mod startup;
 mod watch;
 mod workspace;
@@ -8,6 +9,7 @@ mod workspace;
 use document::{
     place_image, read_document, read_image_data_uri, save_image, write_bytes, write_document,
 };
+use search::search_workspace;
 use startup::{markdown_args, take_startup_files, StartupFiles};
 use tauri::{Emitter, Manager};
 use watch::{
@@ -50,6 +52,7 @@ pub fn run() {
             place_image,
             list_directory,
             reveal_in_folder,
+            search_workspace,
             sync_file_watches,
             suppress_file_watch,
             touch_file_watch_baseline,

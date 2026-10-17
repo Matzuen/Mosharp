@@ -73,6 +73,7 @@ import {
 } from "./editor/preview/formatCommands";
 import { activeOutlineIndex, parseOutlineDoc, type OutlineItem } from "./editor/outline";
 import { LOCALE_LABELS, t, tLines } from "./shell/i18n";
+import { searchWorkspace, type WorkspaceSearch } from "./api/search";
 import { CommandPalette, type PaletteAction } from "./shell/CommandPalette";
 import { MenuBar, type MenuDef, type MenuEntry } from "./shell/MenuBar";
 import { SettingsDialog } from "./shell/SettingsDialog";
@@ -207,6 +208,9 @@ export default function App() {
   let treePollTimer: ReturnType<typeof setInterval> | null = null;
   let sessionTimer: ReturnType<typeof setTimeout> | null = null;
   let scrollUiTimer: ReturnType<typeof setTimeout> | null = null;
+  let searchTimer: ReturnType<typeof setTimeout> | null = null;
+  /** Guards against an older search landing after a newer one. */
+  let searchSeq = 0;
   let activeId = "";
   let restoringSession = false;
   let lastTreeSignature = "";
@@ -233,6 +237,12 @@ export default function App() {
   const [settingsOpen, setSettingsOpen] = createSignal(false);
   const [dropHover, setDropHover] = createSignal(false);
   const [fileQuery, setFileQuery] = createSignal("");
+  const [searchHits, setSearchHits] = createSignal<WorkspaceSearch>({
+    names: [],
+    matches: [],
+    truncated: false,
+  });
+  const [searchBusy, setSearchBusy] = createSignal(false);
   const [recent, setRecent] = createSignal<RecentEntry[]>(loadRecent());
 
   const locale = createMemo(() => prefs().locale);
@@ -1890,6 +1900,7 @@ export default function App() {
       window.removeEventListener("mosharp-notice", onWidgetNotice);
       if (dirtyFadeTimer) clearTimeout(dirtyFadeTimer);
       if (autoSaveTimer) clearTimeout(autoSaveTimer);
+      if (searchTimer) clearTimeout(searchTimer);
       if (treePollTimer) clearInterval(treePollTimer);
       if (sessionTimer) clearTimeout(sessionTimer);
       if (scrollUiTimer) clearTimeout(scrollUiTimer);
@@ -1964,6 +1975,44 @@ export default function App() {
       autoSaveTimer = null;
     }
   });
+
+  /**
+   * Sidebar search runs in the backend: the tree is loaded lazily, so filtering
+   * it would silently miss every file inside a folder the user has not expanded.
+   */
+  createEffect(() => {
+    const query = fileQuery().trim();
+    const root = prefs().workspaceRoot;
+    if (searchTimer) clearTimeout(searchTimer);
+    if (!query || !root || !isTauri()) {
+      searchSeq += 1;
+      setSearchHits({ names: [], matches: [], truncated: false });
+      setSearchBusy(false);
+      return;
+    }
+    const seq = (searchSeq += 1);
+    setSearchBusy(true);
+    searchTimer = setTimeout(() => {
+      searchTimer = null;
+      void searchWorkspace(root, query, 200)
+        .then((result) => {
+          if (seq !== searchSeq) return;
+          setSearchHits(result);
+        })
+        .catch(() => {
+          if (seq !== searchSeq) return;
+          setSearchHits({ names: [], matches: [], truncated: false });
+        })
+        .finally(() => {
+          if (seq === searchSeq) setSearchBusy(false);
+        });
+    }, 220);
+  });
+
+  async function openSearchHit(path: string, line: number) {
+    await openPathInTab(path);
+    editor?.jumpToLine(line);
+  }
 
   let appliedEditorPrefs = "";
   createEffect(() => {
@@ -2150,37 +2199,86 @@ export default function App() {
                   when={prefs().workspaceRoot}
                   fallback={<p class="side-empty">{t(locale(), "emptyFolder")}</p>}
                 >
-                  <For each={visibleFiles()}>
-                    {(node) => (
-                      <button
-                        type="button"
-                        class={`tree-item${node.is_dir ? " dir" : ""}${
-                          samePath(node.path, activeTab()?.path) ? " current" : ""
-                        }`}
-                        style={{ "padding-left": `${10 + node.depth * 14}px` }}
-                        title={node.path}
-                        onClick={() => {
-                          if (node.is_dir) void toggleDir(node);
-                          else void openPathInTab(node.path);
-                        }}
-                        onContextMenu={(event) => {
-                          event.preventDefault();
-                          event.stopPropagation();
-                          setMenu({
-                            x: event.clientX,
-                            y: event.clientY,
-                            kind: "file",
-                            path: node.path,
-                          });
-                        }}
-                      >
-                        <span class="tree-twist">
-                          {node.is_dir ? (node.expanded ? "▾" : "▸") : "·"}
-                        </span>
-                        <span class="tree-name">{node.name}</span>
-                      </button>
-                    )}
-                  </For>
+                  <Show when={fileQuery().trim()}>
+                    <Show when={searchBusy()}>
+                      <p class="side-empty">…</p>
+                    </Show>
+                    <For each={searchHits().names}>
+                      {(hit) => (
+                        <button
+                          type="button"
+                          class={`tree-item${samePath(hit.path, activeTab()?.path) ? " current" : ""}`}
+                          title={hit.path}
+                          onClick={() => void openPathInTab(hit.path)}
+                        >
+                          <span class="tree-twist">·</span>
+                          <span class="tree-name">{hit.name}</span>
+                        </button>
+                      )}
+                    </For>
+                    <Show when={searchHits().matches.length > 0}>
+                      <p class="side-section">
+                        {t(locale(), "contentMatches")} ({searchHits().matches.length})
+                      </p>
+                      <For each={searchHits().matches}>
+                        {(hit) => (
+                          <button
+                            type="button"
+                            class="match-row"
+                            title={`${hit.path}:${hit.line}`}
+                            onClick={() => void openSearchHit(hit.path, hit.line)}
+                          >
+                            <span class="match-file">
+                              {hit.path.split(/[\\/]/).pop()}:{hit.line}
+                            </span>
+                            <span class="match-text">{hit.text}</span>
+                          </button>
+                        )}
+                      </For>
+                    </Show>
+                    <Show
+                      when={
+                        !searchBusy() &&
+                        searchHits().names.length === 0 &&
+                        searchHits().matches.length === 0
+                      }
+                    >
+                      <p class="side-empty">{t(locale(), "noMatches")}</p>
+                    </Show>
+                  </Show>
+                  <Show when={!fileQuery().trim()}>
+                    <For each={visibleFiles()}>
+                      {(node) => (
+                        <button
+                          type="button"
+                          class={`tree-item${node.is_dir ? " dir" : ""}${
+                            samePath(node.path, activeTab()?.path) ? " current" : ""
+                          }`}
+                          style={{ "padding-left": `${10 + node.depth * 14}px` }}
+                          title={node.path}
+                          onClick={() => {
+                            if (node.is_dir) void toggleDir(node);
+                            else void openPathInTab(node.path);
+                          }}
+                          onContextMenu={(event) => {
+                            event.preventDefault();
+                            event.stopPropagation();
+                            setMenu({
+                              x: event.clientX,
+                              y: event.clientY,
+                              kind: "file",
+                              path: node.path,
+                            });
+                          }}
+                        >
+                          <span class="tree-twist">
+                            {node.is_dir ? (node.expanded ? "▾" : "▸") : "·"}
+                          </span>
+                          <span class="tree-name">{node.name}</span>
+                        </button>
+                      )}
+                    </For>
+                  </Show>
                 </Show>
               </Show>
             </div>

@@ -56,7 +56,7 @@ pub fn reveal_in_folder(path: String) -> Result<(), String> {
     reveal_path(&target)
 }
 
-fn is_markdown_name(name: &str) -> bool {
+pub fn is_markdown_name(name: &str) -> bool {
     let lower = name.to_ascii_lowercase();
     lower.ends_with(".md") || lower.ends_with(".markdown") || lower.ends_with(".txt")
 }

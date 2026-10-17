@@ -127,6 +127,8 @@ export const zhTW = {
   zoomOut: "縮小",
   zoomReset: "重設縮放",
   autoSave: "自動儲存（停止輸入後寫入磁碟）",
+  contentMatches: "內容符合",
+  noMatches: "沒有符合的項目",
 };
 
 export const ja = {
@@ -252,6 +254,8 @@ export const ja = {
   zoomOut: "縮小",
   zoomReset: "ズームをリセット",
   autoSave: "自動保存（入力が止まるとディスクに書き込む）",
+  contentMatches: "本文中の一致",
+  noMatches: "一致する項目がありません",
 };
 
 export const de = {
@@ -377,6 +381,8 @@ export const de = {
   zoomOut: "Verkleinern",
   zoomReset: "Zoom zurücksetzen",
   autoSave: "Automatisch speichern (nach Tipppause)",
+  contentMatches: "Im Text",
+  noMatches: "Keine Treffer",
 };
 
 export const fr = {
@@ -502,6 +508,8 @@ export const fr = {
   zoomOut: "Zoom arrière",
   zoomReset: "Réinitialiser le zoom",
   autoSave: "Enregistrement automatique (après une pause de frappe)",
+  contentMatches: "Dans le contenu",
+  noMatches: "Aucun résultat",
 };
 
 export const es = {
@@ -627,4 +635,6 @@ export const es = {
   zoomOut: "Alejar",
   zoomReset: "Restablecer zoom",
   autoSave: "Guardado automático (tras una pausa al escribir)",
+  contentMatches: "En el contenido",
+  noMatches: "Sin resultados",
 };

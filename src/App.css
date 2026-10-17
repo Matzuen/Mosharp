@@ -556,6 +556,46 @@ textarea {
   font-size: 12px;
 }
 
+/* Search results */
+.side-section {
+  margin: 10px 12px 4px;
+  color: var(--muted);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+}
+
+.match-row {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 100%;
+  padding: 4px 10px;
+  border: none;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--ink);
+  text-align: left;
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.match-row:hover {
+  background: var(--hover);
+}
+
+.match-file {
+  color: var(--link);
+  font-size: 11px;
+}
+
+.match-text {
+  color: var(--muted);
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .tree-item:hover,
 .outline-item:hover {
   background: var(--hover);
