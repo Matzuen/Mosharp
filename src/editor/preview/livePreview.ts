@@ -1420,6 +1420,31 @@ export const livePreviewTheme = EditorView.baseTheme({
     display: "block",
     marginTop: "0.35em",
   },
+  // Bubble under an inline formula being edited: zero-sized anchor, absolutely
+  // positioned body, so the line never reflows.
+  ".cm-md-math-bubble": {
+    position: "relative",
+    display: "inline-block",
+    width: "0",
+    height: "0",
+    verticalAlign: "baseline",
+  },
+  ".cm-md-math-bubble-body": {
+    position: "absolute",
+    left: "0",
+    top: "1.1em",
+    zIndex: 20,
+    display: "inline-block",
+    padding: "6px 10px",
+    borderRadius: "8px",
+    background: "var(--ink)",
+    color: "var(--paper)",
+    boxShadow: "0 6px 18px rgba(0, 0, 0, 0.28)",
+    whiteSpace: "nowrap",
+    pointerEvents: "none",
+    fontSize: "0.95em",
+  },
+  ".cm-md-math-bubble-body .katex": { color: "inherit" },
   ".cm-md-math .katex": { color: "inherit" },
   ".cm-md-math-block": {
     display: "block",

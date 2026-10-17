@@ -89,6 +89,48 @@ class MathWidget extends WidgetType {
   }
 }
 
+/**
+ * Rendered bubble that hangs under an inline formula while its source is being
+ * edited. Absolutely positioned inside a zero-sized inline wrapper, so it never
+ * shifts the line and never intercepts clicks.
+ */
+class MathBubbleWidget extends WidgetType {
+  constructor(readonly tex: string) {
+    super();
+  }
+
+  eq(other: MathBubbleWidget) {
+    return other.tex === this.tex;
+  }
+
+  get estimatedHeight() {
+    return -1;
+  }
+
+  toDOM() {
+    const wrap = document.createElement("span");
+    wrap.className = "cm-md-math-bubble";
+    const bubble = document.createElement("span");
+    bubble.className = "cm-md-math-bubble-body";
+    bubble.textContent = this.tex;
+    wrap.appendChild(bubble);
+    const tex = this.tex;
+    void loadKatex()
+      .then((katex) => {
+        if (!bubble.isConnected) return;
+        katex.render(tex, bubble, { throwOnError: false, displayMode: false, output: "html" });
+      })
+      .catch(() => {
+        bubble.textContent = tex;
+      });
+    return wrap;
+  }
+
+  ignoreEvent() {
+    return true;
+  }
+}
+
 function rangeHasCursor(view: EditorView, from: number, to: number) {
   for (const range of view.state.selection.ranges) {
     if (range.head >= from && range.head <= to) return true;
@@ -268,12 +310,18 @@ function decorateInline(view: EditorView, lineFrom: number, text: string, build:
     // Inline maths reveals only while the caret is *between* the dollars: a
     // caret parked just after the closing `$` is writing prose, so the formula
     // stays rendered. (Block maths does the opposite — see the `$$` branch.)
-    if (
-      !covered(build, from, to) &&
-      !cursorStrictlyInside(view, from, to) &&
-      tex.length <= MAX_TEX
-    ) {
-      hideMath(build, from, to, tex, false);
+    if (!covered(build, from, to) && tex.length <= MAX_TEX) {
+      if (cursorStrictlyInside(view, from, to)) {
+        // While editing the source, show the rendered form in a bubble below —
+        // no layout shift, and the TeX stays readable in place.
+        if (tex.trim()) {
+          build.decos.push(
+            Decoration.widget({ widget: new MathBubbleWidget(tex), side: -1 }).range(from),
+          );
+        }
+      } else {
+        hideMath(build, from, to, tex, false);
+      }
     }
     i = found + 1;
   }

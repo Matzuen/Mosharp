@@ -78,7 +78,13 @@ assert(probe("$$x^2$$\n", 7).decos.length === 1, "single-line display math rende
 assert(probe("$$x^2$$\n", 8).decos.length === 1, "single-line display math renders after the line");
 assert(probe("$$x^2$$\n", 3).decos.length === 0, "single-line display math reveals inside");
 assert(probe("a $x^2$ b\n", 9).decos.length === 1, "inline math decorates");
-assert(probe("a $x^2$ b\n", 4).decos.length === 0, "inline math reveals under the caret");
+// While editing, the source stays and a bubble carries the rendered form. The
+// bubble is a zero-sized point widget, so it cannot push the line around.
+const inlineEditing = probe("a $x^2$ b\n", 4);
+assert(!renders(inlineEditing), "inline math reveals under the caret");
+const bubble = inlineEditing.decos.filter((deco) => deco.from === deco.to);
+assert(bubble.length === 1, `inline editing adds exactly one bubble (got ${bubble.length})`);
+assert(bubble[0].from === 2, `the bubble anchors at the opening dollar (got ${bubble[0].from})`);
 // Inline maths only reveals with the caret *between* the dollars; sitting just
 // after the closing `$` is ordinary prose and keeps the formula rendered.
 assert(probe("a $x^2$ b\n", 7).decos.length === 1, "inline math renders right after the closing $");
