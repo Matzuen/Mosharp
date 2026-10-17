@@ -72,6 +72,8 @@ export interface Preferences {
   spellLang: SpellLang;
   customWords: string;
   shortcuts: ShortcutMap;
+  /** Whole-window scale, 0.6 – 2.0 in 0.1 steps. */
+  zoom: number;
 }
 
 const KEY = "mosharp.preferences.v1";
@@ -102,7 +104,19 @@ export const defaultPreferences: Preferences = {
   spellLang: "zh-CN",
   customWords: "",
   shortcuts: { ...DEFAULT_SHORTCUTS },
+  zoom: 1,
 };
+
+export const MIN_ZOOM = 0.6;
+export const MAX_ZOOM = 2;
+export const ZOOM_STEP = 0.1;
+
+/** Snap to a 0.1 step inside the supported range; junk falls back to 100%. */
+export function clampZoom(value: number): number {
+  if (!Number.isFinite(value)) return 1;
+  const stepped = Math.round(value / ZOOM_STEP) * ZOOM_STEP;
+  return Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, Math.round(stepped * 100) / 100));
+}
 
 function loadShortcuts(value: unknown): ShortcutMap {
   const next = { ...DEFAULT_SHORTCUTS };
@@ -168,6 +182,7 @@ export function loadPreferences(): Preferences {
       spellLang: parsed.spellLang === "en-US" ? "en-US" : "zh-CN",
       customWords: typeof parsed.customWords === "string" ? parsed.customWords : "",
       shortcuts: loadShortcuts(parsed.shortcuts),
+      zoom: clampZoom(parsed.zoom ?? defaultPreferences.zoom),
     };
   } catch {
     return { ...defaultPreferences, shortcuts: { ...DEFAULT_SHORTCUTS } };
@@ -181,6 +196,7 @@ export function savePreferences(prefs: Preferences): void {
       JSON.stringify({
         ...prefs,
         panelWidth: clampPanelWidth(prefs.panelWidth),
+        zoom: clampZoom(prefs.zoom),
       }),
     );
   } catch {

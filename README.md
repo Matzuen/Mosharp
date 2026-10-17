@@ -128,8 +128,9 @@ npm run tauri build -- --bundles nsis
 | 加粗 / 斜体 / 行内代码 | `Ctrl+B` / `Ctrl+I` / `Ctrl+E` |
 | 高亮 / 删除线 | `Ctrl+Shift+H` / `Ctrl+Shift+U` |
 | 链接 / 勾选任务 | `Ctrl+K` / `Ctrl+Enter` |
+| 窗口缩放 / 重置 | `Ctrl+=` `Ctrl+-` / `Ctrl+0` |
 
-文内链接和网址要按住 `Ctrl` 再点才会跳转。行首 `/` 插入标题、列表、表格、代码块。
+文内链接和网址要按住 `Ctrl` 再点才会跳转。行首 `/` 插入标题、列表、表格、代码块。缩放会记在偏好里，下次启动沿用。
 
 ## 数据位置
 

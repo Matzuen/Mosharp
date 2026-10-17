@@ -79,13 +79,17 @@ import { SettingsDialog } from "./shell/SettingsDialog";
 import { chordFromEvent } from "./shell/shortcuts";
 import {
   clampPanelWidth,
+  clampZoom,
   CONTENT_WIDTHS,
   defaultPreferencesFor,
   LOCALES,
   loadPreferences,
   MAX_PANEL,
+  MAX_ZOOM,
   MIN_PANEL,
+  MIN_ZOOM,
   savePreferences,
+  ZOOM_STEP,
   type Preferences,
   type ShortcutId,
 } from "./shell/preferences";
@@ -288,6 +292,18 @@ export default function App() {
 
   function patchPrefs(partial: Partial<Preferences>) {
     persistPrefs({ ...prefs(), ...partial });
+  }
+
+  /**
+   * Change the window zoom by whole steps. A `delta` of 0 resets to 100%.
+   * Persisted, so the next launch opens at the same scale.
+   */
+  function stepZoom(delta: number) {
+    const base = delta === 0 ? 1 : prefs().zoom + delta * ZOOM_STEP;
+    const next = clampZoom(Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, base)));
+    if (next === prefs().zoom) return;
+    patchPrefs({ zoom: next });
+    setNotice(`${Math.round(next * 100)}%`);
   }
 
   function shortcut(id: ShortcutId): string {
@@ -1294,6 +1310,10 @@ export default function App() {
             run: () => patchPrefs({ contentWidth: width }),
           })),
           { id: "sep-view-3", sep: true },
+          { id: "zoom-in", label: label("zoomIn"), shortcut: "Ctrl+=", run: () => stepZoom(1) },
+          { id: "zoom-out", label: label("zoomOut"), shortcut: "Ctrl+-", run: () => stepZoom(-1) },
+          { id: "zoom-reset", label: label("zoomReset"), shortcut: "Ctrl+0", run: () => stepZoom(0) },
+          { id: "sep-view-4", sep: true },
           ...LOCALES.map((id) => ({
             id: `lang-${id}`,
             label: LOCALE_LABELS[id],
@@ -1646,6 +1666,26 @@ export default function App() {
     }, 2000);
 
     const onKeyDown = (event: KeyboardEvent) => {
+      // Window zoom. Handled before the shortcut map so it works even while a
+      // user shortcut shadows the same chord, and never reaches the WebView's
+      // own zoom handling.
+      if ((event.ctrlKey || event.metaKey) && !event.altKey) {
+        if (event.key === "=" || event.key === "+") {
+          event.preventDefault();
+          stepZoom(1);
+          return;
+        }
+        if (event.key === "-" || event.key === "_") {
+          event.preventDefault();
+          stepZoom(-1);
+          return;
+        }
+        if (event.key === "0") {
+          event.preventDefault();
+          stepZoom(0);
+          return;
+        }
+      }
       if (event.key === "Escape") {
         // One layer per press, innermost first, and give focus back to the
         // editor so typing works again immediately.
@@ -1870,6 +1910,17 @@ export default function App() {
     for (const menu of menus()) walk(menu.items, `${menu.label} / `);
     return actions;
   }
+
+  /** Apply the persisted window zoom and keep the WebView's layout in sync. */
+  createEffect(() => {
+    const value = prefs().zoom;
+    const root = document.documentElement;
+    if (root.style.zoom === String(value)) return;
+    root.style.zoom = String(value);
+    // CodeMirror re-measures on window resize; a zoom change does not fire one,
+    // so nudge it or the caret coordinates stay stale until the next edit.
+    window.dispatchEvent(new Event("resize"));
+  });
 
   let appliedEditorPrefs = "";
   createEffect(() => {

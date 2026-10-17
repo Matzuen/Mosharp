@@ -123,6 +123,9 @@ export const zhTW = {
   focusMode: "專注",
   linesChars: (count: string, chars: string, words: string) =>
     `${count} 行 · ${chars} 字元 · ${words} 字`,
+  zoomIn: "放大",
+  zoomOut: "縮小",
+  zoomReset: "重設縮放",
 };
 
 export const ja = {
@@ -244,6 +247,9 @@ export const ja = {
   typewriter: "タイプライター",
   focusMode: "集中",
   linesChars: lines("行", "文字", "語"),
+  zoomIn: "拡大",
+  zoomOut: "縮小",
+  zoomReset: "ズームをリセット",
 };
 
 export const de = {
@@ -365,6 +371,9 @@ export const de = {
   typewriter: "Schreibmaschine",
   focusMode: "Fokus",
   linesChars: lines("Zeilen", "Zeichen", "Wörter"),
+  zoomIn: "Vergrößern",
+  zoomOut: "Verkleinern",
+  zoomReset: "Zoom zurücksetzen",
 };
 
 export const fr = {
@@ -486,6 +495,9 @@ export const fr = {
   typewriter: "Machine à écrire",
   focusMode: "Concentration",
   linesChars: lines("lignes", "caractères", "mots"),
+  zoomIn: "Zoom avant",
+  zoomOut: "Zoom arrière",
+  zoomReset: "Réinitialiser le zoom",
 };
 
 export const es = {
@@ -607,4 +619,7 @@ export const es = {
   typewriter: "Máquina de escribir",
   focusMode: "Concentración",
   linesChars: lines("líneas", "caracteres", "palabras"),
+  zoomIn: "Acercar",
+  zoomOut: "Alejar",
+  zoomReset: "Restablecer zoom",
 };

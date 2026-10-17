@@ -122,6 +122,9 @@ const messages = {
     focusMode: "专注",
     linesChars: (lines: string, chars: string, words: string) =>
       `${lines} 行 · ${chars} 字符 · ${words} 字`,
+    zoomIn: "放大",
+    zoomOut: "缩小",
+    zoomReset: "重置缩放",
   },
   en: {
     brand: "Mosharp",
@@ -243,6 +246,9 @@ const messages = {
     focusMode: "Focus",
     linesChars: (lines: string, chars: string, words: string) =>
       `${lines} lines · ${chars} chars · ${words} words`,
+    zoomIn: "Zoom In",
+    zoomOut: "Zoom Out",
+    zoomReset: "Reset Zoom",
   },
   "zh-TW": zhTW,
   ja,
