@@ -1915,6 +1915,9 @@ export default function App() {
   createEffect(() => {
     const value = prefs().zoom;
     const root = document.documentElement;
+    // `vh`/`vw` lengths are scaled by `zoom`, so a viewport-sized overlay would
+    // grow past the window. Overlays divide their viewport sizing by this.
+    root.style.setProperty("--ui-zoom", String(value));
     if (root.style.zoom === String(value)) return;
     root.style.zoom = String(value);
     // CodeMirror re-measures on window resize; a zoom change does not fire one,

@@ -390,7 +390,7 @@ textarea {
 }
 
 .menu-flyout {
-  max-height: 70vh;
+  max-height: calc(70vh / var(--ui-zoom, 1));
   overflow: auto;
 }
 
@@ -406,7 +406,10 @@ textarea {
  * Menus that own a flyout are short enough to skip the cap.
  */
 .menu-drop.is-scrollable {
-  max-height: min(70vh, calc(100vh - 80px));
+  max-height: min(
+    calc(70vh / var(--ui-zoom, 1)),
+    calc(100vh / var(--ui-zoom, 1) - 80px)
+  );
   overflow-y: auto;
   overflow-x: hidden;
 }
@@ -650,7 +653,7 @@ textarea {
 }
 
 .status-path {
-  max-width: 36vw;
+  max-width: calc(36vw / var(--ui-zoom, 1));
 }
 
 .status-format {
@@ -670,14 +673,14 @@ textarea {
 
 .status-notice {
   margin-left: auto;
-  max-width: 42vw;
+  max-width: calc(42vw / var(--ui-zoom, 1));
 }
 
 .context-menu {
   position: fixed;
   z-index: 50;
   min-width: 168px;
-  max-height: calc(100vh - 16px);
+  max-height: calc(100vh / var(--ui-zoom, 1) - 16px);
   overflow: auto;
   padding: 4px;
   border: 1px solid var(--line);
@@ -803,8 +806,8 @@ textarea {
 }
 
 .palette {
-  width: min(440px, calc(100vw - 32px));
-  margin: 14vh auto 0;
+  width: min(440px, calc(100vw / var(--ui-zoom, 1) - 32px));
+  margin: calc(14vh / var(--ui-zoom, 1)) auto 0;
   border: 1px solid var(--line);
   border-radius: 10px;
   background: var(--menu);
@@ -863,9 +866,9 @@ textarea {
 }
 
 .settings-dialog {
-  width: min(680px, calc(100vw - 32px));
-  height: min(520px, calc(100vh - 64px));
-  margin: 8vh auto 0;
+  width: min(680px, calc(100vw / var(--ui-zoom, 1) - 32px));
+  height: min(520px, calc(100vh / var(--ui-zoom, 1) - 64px));
+  margin: calc(8vh / var(--ui-zoom, 1)) auto 0;
   display: flex;
   flex-direction: column;
   border: 1px solid var(--line);
