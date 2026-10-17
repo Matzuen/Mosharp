@@ -1050,6 +1050,10 @@ function decorateRange(
             build.covered.push({ from: line.from, to: line.to });
           }
         }
+        // Separate consecutive blocks: two fences glued together otherwise read
+        // as one continuous card.
+        addLineClass(build, start.number, "cm-md-codeblock-start");
+        addLineClass(build, end.number, "cm-md-codeblock-end");
         build.covered.push({ from: node.from, to: node.to });
       }
 
@@ -1633,6 +1637,16 @@ export const livePreviewTheme = EditorView.baseTheme({
     color: "var(--code-block-ink)",
     fontFamily: 'Consolas, "Courier New", monospace',
     fontSize: "0.92em",
+  },
+  // Transparent borders + padding-box clipping give a gap without using margins,
+  // which the editor's line measurement does not expect.
+  ".cm-md-codeblock-start": {
+    borderTop: "6px solid transparent",
+    backgroundClip: "padding-box",
+  },
+  ".cm-md-codeblock-end": {
+    borderBottom: "6px solid transparent",
+    backgroundClip: "padding-box",
   },
   ".cm-md-table-source": {
     fontFamily: 'Consolas, "Courier New", ui-monospace, monospace',
