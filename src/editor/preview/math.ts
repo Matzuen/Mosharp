@@ -313,11 +313,10 @@ export function decorateMath(
         const closing = doc.line(close);
         const blockTo = closing.to;
         const overlaps = blockTo >= viewportFrom && blockFrom <= viewportTo;
-        // The closing fence is deliberately NOT part of the "being edited"
-        // range. A document that ends with `$$` leaves the caret at exactly
-        // blockTo, and including that position made the block render never.
-        const bodyEnd = close > n + 1 ? doc.line(close - 1).to : line.to;
-        if (overlaps && !rangeHasCursor(view, blockFrom, bodyEnd)) {
+        // The whole block counts as "being edited", including the closing fence:
+        // a caret parked right after the last `$` is still working on this
+        // formula, so it must show the source instead of collapsing the block.
+        if (overlaps && !rangeHasCursor(view, blockFrom, blockTo)) {
           const tex = doc.sliceString(doc.line(n + 1).from, closing.from).replace(/\n$/, "");
           if (tex.length <= MAX_TEX) {
             hideMath(build, line.from, line.to, tex, true);
@@ -325,13 +324,7 @@ export function decorateMath(
               const extra = doc.line(j);
               sinkLine(build, j, extra.from, extra.to);
             }
-            if (rangeHasCursor(view, closing.from, closing.to)) {
-              // Keep the line box so the caret is never stranded in a
-              // zero-height line, but hide the fence text itself.
-              build.decos.push(Decoration.replace({}).range(closing.from, closing.to));
-            } else {
-              sinkLine(build, close, closing.from, closing.to);
-            }
+            sinkLine(build, close, closing.from, closing.to);
             build.covered.push({ from: blockFrom, to: blockTo });
             build.labels?.set(line.from, `${n}–${close}`);
           }

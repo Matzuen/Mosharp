@@ -23,52 +23,52 @@ function assert(condition: boolean, message: string): void {
   if (!condition) throw new Error(message);
 }
 
-// A document that ends at the closing fence puts the caret on the fence itself.
-// That used to count as "caret inside the block", so the formula never rendered.
-const endsWithFence = "$$\na^2+b^2=c^2\n$$";
-const atEnd = probe(endsWithFence, endsWithFence.length);
-assert(atEnd.decos.length > 0, "a block ending the document still renders");
+// Collapsed rendering: the caret lives outside the block.
+const blockDoc = "$$\na^2+b^2=c^2\n$$";
+const withTail = `${blockDoc}\n\ntail`;
+const collapsed = probe(withTail, withTail.length);
+assert(collapsed.decos.length > 0, "caret outside the block renders it");
 assert(
-  atEnd.decos.some((deco) => deco.from === 0 && deco.to === 2),
+  collapsed.decos.some((deco) => deco.from === 0 && deco.to === 2),
   "the opening fence is replaced by the formula",
 );
 assert(
-  !atEnd.atomic.some((deco) => deco.from === endsWithFence.length - 2),
-  "the closing fence stays reachable while the caret sits on it",
+  collapsed.atomic.some((deco) => deco.from === blockDoc.length - 2),
+  "the closing fence is swallowed by the collapsed block",
 );
 
 // A collapsed block also labels its source span in the gutter, so the number
 // column shows "1–3" instead of skipping the swallowed lines.
 assert(
-  [...atEnd.labels.values()].includes("1–3"),
-  `collapsed block labels its source range (got ${JSON.stringify([...atEnd.labels.values()])})`,
+  [...collapsed.labels.values()].includes("1–3"),
+  `collapsed block labels its source range (got ${JSON.stringify([...collapsed.labels.values()])})`,
 );
 
-// The caret anywhere in the opening fence or the body must reveal the source,
-// otherwise the TeX cannot be edited. A rendered preview is still appended
+// The caret anywhere in the block — opening fence, body, or right after the
+// last `$` — must reveal the source. A rendered preview is still appended
 // below it, so "no replacement decoration" is what "source is visible" means.
 const renders = (build: { decos: Array<{ from: number; to: number }> }) =>
   build.decos.some((deco) => deco.to > deco.from);
 const previewOnly = (build: { decos: Array<{ from: number; to: number }> }) =>
   build.decos.length > 0 && !renders(build);
 
-assert(!renders(probe(endsWithFence, 1)), "caret on the opening fence shows source");
-assert(!renders(probe(endsWithFence, 4)), "caret in the body shows source");
-assert(previewOnly(probe(endsWithFence, 4)), "editing renders a preview below the source");
+assert(!renders(probe(blockDoc, 1)), "caret on the opening fence shows source");
+assert(!renders(probe(blockDoc, 4)), "caret in the body shows source");
+assert(!renders(probe(blockDoc, blockDoc.length)), "caret after the last $ shows source");
+assert(previewOnly(probe(blockDoc, 4)), "editing renders a preview below the source");
 
 // The preview must be an inline widget on the closing fence's end: block
 // widgets are not allowed from a view plugin, and trying left the formula
 // stuck in its rendered state.
-const editing = probe(endsWithFence, 4);
+const editing = probe(blockDoc, 4);
 const points = editing.decos.filter((deco) => deco.from === deco.to);
 assert(points.length === 1, `editing adds exactly one widget (got ${points.length})`);
 assert(
-  points[0].from === endsWithFence.length,
+  points[0].from === blockDoc.length,
   `the preview sits at the end of the closing fence (got ${points[0].from})`,
 );
 
 // Trailing content keeps working as before.
-const withTail = `${endsWithFence}\n\ntail`;
 assert(renders(probe(withTail, withTail.length)), "caret after the block renders it");
 assert(!renders(probe(withTail, 4)), "caret in the body still shows source");
 
