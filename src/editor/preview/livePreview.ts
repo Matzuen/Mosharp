@@ -185,7 +185,16 @@ class HtmlBlockWidget extends WidgetType {
     wrap.innerHTML = sanitizeHtml(this.source);
     wrap.addEventListener("mousedown", (event) => {
       if (!(event instanceof MouseEvent) || event.button !== 0) return;
-      if ((event.target as HTMLElement | null)?.closest("a")) return;
+      const anchor = (event.target as HTMLElement | null)?.closest("a");
+      const href = anchor?.getAttribute("href") ?? "";
+      // A link inside rendered HTML must never navigate the app window; open
+      // http(s) externally and treat everything else as "show me the source".
+      if (anchor && /^https?:\/\//i.test(href)) {
+        event.preventDefault();
+        event.stopPropagation();
+        window.open(href, "_blank", "noopener,noreferrer");
+        return;
+      }
       event.preventDefault();
       event.stopPropagation();
       const at = Math.min(this.caretAt, view.state.doc.length);
@@ -265,12 +274,9 @@ function recoverFencesInHtmlBlock(
       .sliceString(doc.line(n + 1).from, closer.from)
       .replace(/\n$/, "");
     const kind = diagramKind(info);
-    const lower = info.toLowerCase();
     const widget: WidgetType = kind
       ? new DiagramWidget(kind, source)
-      : lower === "html" || lower === "htm"
-        ? new HtmlBlockWidget(source, opener.from + 1)
-        : new CodeBlockWidget(source, info);
+      : new CodeBlockWidget(source, info);
 
     const deco = Decoration.replace({ widget }).range(opener.from, opener.to);
     build.decos.push(deco);
@@ -1014,32 +1020,9 @@ function decorateRange(
           spanLabel(build, view.state.doc, start.number, end.number);
           return false;
         }
-        // ```html renders for real. The source is allow-list sanitized first:
-          // the preview runs inside the app window, which holds Tauri IPC access.
-        if (name === "FencedCode" && !cursorIn && /^(?:html|htm)$/i.test((info ?? "").trim())) {
-          const bodyFrom = start.number < end.number ? view.state.doc.line(start.number + 1).from : start.to;
-          const bodyTo = end.number > start.number ? view.state.doc.line(end.number).from : end.to;
-          const source = view.state.doc.sliceString(bodyFrom, Math.max(bodyFrom, bodyTo)).replace(/\n$/, "");
-          if (source.trim().length <= 20_000) {
-            const deco = Decoration.replace({ widget: new HtmlBlockWidget(source, start.from + 1) }).range(
-              start.from,
-              start.to,
-            );
-            build.decos.push(deco);
-            build.atomic.push(deco);
-            for (let n = start.number + 1; n <= end.number; n += 1) {
-              const line = view.state.doc.line(n);
-              const sink = Decoration.replace({ widget: collapseWidget }).range(line.from, line.to);
-              build.decos.push(sink);
-              build.atomic.push(sink);
-              addLineClass(build, n, "cm-md-sink");
-              build.hidden.push(line.from);
-            }
-            build.covered.push({ from: start.from, to: end.to });
-            spanLabel(build, view.state.doc, start.number, end.number);
-            return false;
-          }
-        }
+        // ```html stays a code block: the author asked for its source. Only tags
+        // written directly in the document are rendered (see the HTMLBlock arm).
+        
         for (let n = start.number; n <= end.number; n += 1) {
           const line = view.state.doc.line(n);
           if (line.from > to || line.to < from) continue;
@@ -1083,8 +1066,31 @@ function decorateRange(
         const doc = view.state.doc;
         const startLine = doc.lineAt(node.from);
         const endLine = doc.lineAt(Math.min(node.to, doc.length));
-        if (recoverFencesInHtmlBlock(view, build, startLine, endLine)) {
+        const recovered = recoverFencesInHtmlBlock(view, build, startLine, endLine);
+        if (recovered) {
           addLineClass(build, startLine.number, "cm-md-html-source");
+        } else if (!rangeHasCursor(view, node.from, node.to)) {
+          // Raw tags written directly in the document render for real, through
+          // the allow-list sanitizer. Nothing that sanitizes down to empty (a
+          // comment, an unknown tag) is replaced, or the block would vanish.
+          const source = doc.sliceString(startLine.from, endLine.to);
+          if (sanitizeHtml(source).trim().length > 0 && source.length <= 20_000) {
+            const deco = Decoration.replace({
+              widget: new HtmlBlockWidget(source, startLine.from + 1),
+            }).range(startLine.from, startLine.to);
+            build.decos.push(deco);
+            build.atomic.push(deco);
+            for (let n = startLine.number + 1; n <= endLine.number; n += 1) {
+              const line = doc.line(n);
+              const sink = Decoration.replace({ widget: collapseWidget }).range(line.from, line.to);
+              build.decos.push(sink);
+              build.atomic.push(sink);
+              addLineClass(build, n, "cm-md-sink");
+              build.hidden.push(line.from);
+            }
+            build.covered.push({ from: startLine.from, to: endLine.to });
+            spanLabel(build, doc, startLine.number, endLine.number);
+          }
         }
       }
 
