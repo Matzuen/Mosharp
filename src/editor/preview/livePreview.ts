@@ -18,6 +18,7 @@ import { decorateMath } from "./math";
 import { DiagramWidget } from "./diagramFence";
 import { diagramKind } from "./diagramKind";
 import { notify } from "./notify";
+import { insideStrictly } from "./cursorScope";
 import { focusModeField, sourceModeField } from "./modes";
 import { quoteDepth } from "./quoteDepth";
 import {
@@ -42,6 +43,9 @@ const ICON_TRASH = `<svg ${ICON_ATTRS}><path d="M2.5 4.5h11M6 4.5V3h4v1.5M4.5 4.
 
 /** Order of the alignment buttons, matching their `TableOp` values. */
 const ALIGN_ORDER = ["left", "center", "right"] as const;
+
+/** Cell to focus once the table widget at `from` has been rebuilt. */
+let pendingCellFocus: { from: number; row: number; col: number } | null = null;
 
 /** Docs at/above this line count: decorate only after scroll settles. */
 const LARGE_DOC_LINES = 8_000;
@@ -199,8 +203,26 @@ class TableWidget extends WidgetType {
       syncActive();
     };
 
+    // Declared before the rows are built so `renderRow` can bind it; `run` is
+    // only reached when Tab is pressed, by which point it exists.
+    const handleTab = (delta: number) => {
+      const cells = Array.from(table.querySelectorAll<HTMLElement>(".cm-md-cell"));
+      const index = cells.indexOf(document.activeElement as HTMLElement);
+      const next = index < 0 ? undefined : cells[index + delta];
+      if (next) {
+        next.focus();
+        return;
+      }
+      if (delta < 0) return;
+      const lastRow = table.querySelectorAll("tr").length - 1;
+      this.activeRow = lastRow;
+      this.activeCol = 0;
+      pendingCellFocus = { from: this.from, row: lastRow + 1, col: 0 };
+      run("row-below");
+    };
+
     const thead = document.createElement("thead");
-    thead.appendChild(renderRow(header, aligns, "th", 0, commitAt, activateAt, view));
+    thead.appendChild(renderRow(header, aligns, "th", 0, commitAt, activateAt, view, handleTab));
     table.appendChild(thead);
 
     const tbody = document.createElement("tbody");
@@ -208,7 +230,7 @@ class TableWidget extends WidgetType {
     for (let i = bodyStart; i < lines.length; i += 1) {
       if (isDelimiterRow(lines[i])) continue;
       tbody.appendChild(
-        renderRow(splitCells(lines[i]), aligns, "td", visualRow, commitAt, activateAt, view),
+        renderRow(splitCells(lines[i]), aligns, "td", visualRow, commitAt, activateAt, view, handleTab),
       );
       visualRow += 1;
     }
@@ -395,6 +417,17 @@ class TableWidget extends WidgetType {
     wrap.append(table, left, chrome);
     syncActive();
     this.dom = wrap;
+    // A Tab on the last cell appends a row; the rebuild is what creates its
+    // cells, so the focus has to be restored after it lands.
+    if (pendingCellFocus?.from === this.from) {
+      const target = pendingCellFocus;
+      pendingCellFocus = null;
+      requestAnimationFrame(() => {
+        const rows = wrap.querySelectorAll("tr");
+        const cell = rows[target.row]?.children[target.col];
+        if (cell instanceof HTMLElement) cell.focus();
+      });
+    }
     return wrap;
   }
 
@@ -417,6 +450,7 @@ function renderRow(
   onCommit: (row: number, col: number, text: string) => void,
   onActivate: (row: number, col: number) => void,
   view: EditorView,
+  onTab: (delta: number) => void,
 ) {
   const row = document.createElement("tr");
   for (let i = 0; i < cells.length; i += 1) {
@@ -465,6 +499,12 @@ function renderRow(
         event.preventDefault();
         if (event.shiftKey) redo(view);
         else undo(view);
+        return;
+      }
+      if (event.key === "Tab") {
+        // Tab walks the cells instead of leaving the table on the first press.
+        event.preventDefault();
+        onTab(event.shiftKey ? -1 : 1);
         return;
       }
       if (event.key === "Enter" && event.shiftKey) {
@@ -682,6 +722,18 @@ function parentHoldsCursor(view: EditorView, node: SyntaxNode) {
   return rangeHasCursor(view, parent.from, parent.to);
 }
 
+/**
+ * Same idea for inline markers, but the boundaries do not count: a caret right
+ * after `**bold**` is already writing outside the emphasis, so revealing the
+ * markers there made them flash as the caret moved past the end.
+ */
+function parentStrictlyHoldsCursor(view: EditorView, node: SyntaxNode) {
+  const parent = node.parent;
+  const from = parent ? parent.from : node.from;
+  const to = parent ? parent.to : node.to;
+  return view.state.selection.ranges.some((range) => insideStrictly(range.head, from, to));
+}
+
 function showSyntax(build: PreviewBuild, from: number, to: number) {
   if (to <= from) return;
   build.decos.push(Decoration.mark({ class: "cm-md-syntax" }).range(from, to));
@@ -853,7 +905,7 @@ function decorateRange(
         name === "LinkMark" ||
         name === "CodeInfo"
       ) {
-        if (parentHoldsCursor(view, node.node)) showSyntax(build, node.from, node.to);
+        if (parentStrictlyHoldsCursor(view, node.node)) showSyntax(build, node.from, node.to);
         else hide(build, node.from, node.to);
       }
 
