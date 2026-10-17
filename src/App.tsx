@@ -500,9 +500,19 @@ export default function App() {
 
   function refreshOutline() {
     if (!editor) return;
-    const items = parseOutlineDoc(editor.getState().doc);
-    setOutline(items);
-    setActiveHeading(activeOutlineIndex(items, editor.firstVisibleLine()));
+    const next = parseOutlineDoc(editor.getState().doc);
+    // Keep the objects that did not change: `For` is keyed by identity, so
+    // reusing them means a refresh patches only the headings that actually
+    // changed instead of rebuilding every row.
+    setOutline((previous) =>
+      next.map((item, index) => {
+        const old = previous[index];
+        return old && old.line === item.line && old.level === item.level && old.text === item.text
+          ? old
+          : item;
+      }),
+    );
+    setActiveHeading(activeOutlineIndex(next, editor.firstVisibleLine()));
   }
 
   /**

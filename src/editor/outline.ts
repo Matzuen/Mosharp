@@ -17,11 +17,11 @@ function push(items: OutlineItem[], entry: { level: number; text: string; line: 
 }
 
 /**
- * Hard stop for pathological documents. Raised well above the old 800 so a long
- * book no longer gets its outline cut off halfway; the panel renders thousands
- * of rows cheaply thanks to `content-visibility` on `.outline-item`.
+ * Pure safety valve, not a product limit: 50 000 headings is far beyond any real
+ * document, and the panel renders rows lazily (`content-visibility`), so hitting
+ * it would mean the file is pathological rather than just long.
  */
-export const MAX_OUTLINE_ITEMS = 5000;
+export const MAX_OUTLINE_ITEMS = 50_000;
 
 /** 从 Markdown 源码提取 ATX 标题。行号从 1 开始。 */
 export function parseOutline(markdown: string, maxItems = MAX_OUTLINE_ITEMS): OutlineItem[] {

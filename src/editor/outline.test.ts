@@ -1,5 +1,5 @@
 import { EditorState } from "@codemirror/state";
-import { activeOutlineIndex, parseOutline, parseOutlineDoc } from "./outline.ts";
+import { activeOutlineIndex, MAX_OUTLINE_ITEMS, parseOutline, parseOutlineDoc } from "./outline.ts";
 import { tocEntries } from "./preview/toc.ts";
 
 function assert(condition: boolean, message: string): void {
@@ -52,6 +52,14 @@ assert(
 assert(parseOutline("# a\n# b\n# c\n# d\n", 2).length === 2, "maxItems stops the scan");
 assert(parseOutline("").length === 0, "empty document has no headings");
 assert(parseOutline("## \n").length === 0, "a heading needs text");
+
+// The cap is a safety valve, not a product limit: a real document must never
+// hit it.
+assert(MAX_OUTLINE_ITEMS === 50_000, `cap is 50k (got ${MAX_OUTLINE_ITEMS})`);
+assert(
+  parseOutline(Array.from({ length: 60_000 }, () => "# x").join("\n")).length === 50_000,
+  "50k headings are all listed",
+);
 
 // Current-position highlighting
 assert(activeOutlineIndex(items, 1) === 0, "first line selects the first heading");
