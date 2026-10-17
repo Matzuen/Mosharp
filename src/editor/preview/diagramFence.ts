@@ -1,9 +1,12 @@
 import { EditorView, WidgetType } from "@codemirror/view";
 import type { DiagramKind } from "./diagramKind";
 import { DIAGRAM_FAILED, DIAGRAM_TOO_BIG, mountMermaid } from "./mermaidBlock";
+import { notify } from "./notify";
 import { encodePlantuml, plantumlSvgUrl } from "./plantuml";
 
 const MAX_SOURCE = 20_000;
+/** The upload disclosure is shown once per session, not on every diagram. */
+let plantumlAnnounced = false;
 
 type DiagramHost = HTMLElement & {
   _token?: object;
@@ -85,7 +88,16 @@ async function mountPlantuml(el: HTMLElement, source: string, token: object) {
     img.alt = "PlantUML";
     img.src = plantumlSvgUrl(encoded);
     img.addEventListener("error", () => fail(el, token));
-    el.replaceChildren(img);
+    // PlantUML is rendered by a third-party server: the diagram source leaves
+    // the machine, so say so instead of sending it silently.
+    const note = document.createElement("div");
+    note.className = "cm-md-diagram-note";
+    note.textContent = "PlantUML 由 plantuml.com 在线渲染，图表源码会发送到该服务器";
+    el.replaceChildren(img, note);
+    if (!plantumlAnnounced) {
+      plantumlAnnounced = true;
+      notify("PlantUML 图表通过 plantuml.com 渲染，源码会上传到该服务");
+    }
   } catch {
     fail(el, token);
   }

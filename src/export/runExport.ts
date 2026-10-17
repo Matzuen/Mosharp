@@ -13,7 +13,7 @@ import {
 } from "./article";
 import { dataImageToPng, drawDiagram, svgToPng, type DiagramColors } from "./diagrams";
 import { markdownToDocx, pictureHrefs, topLevelDiagrams } from "./docx";
-import { cursorLine, numberedExportName } from "./pages";
+import { cursorLine, numberedExportName, pageStarts } from "./pages";
 import { presentSlides, type SlideLabels } from "./present";
 import { splitDeck } from "./slides";
 
@@ -183,18 +183,28 @@ async function exportPng(request: ExportRequest, colors: ThemeColors) {
     await waitForPaint(host);
     const column = host.querySelector(".mosharp-doc");
     if (!(column instanceof HTMLElement)) return;
-    const total = Math.max(1, Math.ceil(column.scrollHeight / pageHeight));
+    const total = Math.max(1, column.scrollHeight);
+    // Break pages between blocks so tables, code blocks and images stay whole.
+    const base = column.getBoundingClientRect().top;
+    const blocks = Array.from(column.children).map((child) => {
+      const rect = (child as HTMLElement).getBoundingClientRect();
+      return { top: Math.round(rect.top - base), bottom: Math.round(rect.bottom - base) };
+    });
+    const starts = pageStarts(blocks, pageHeight, total);
     const pages: Uint8Array[] = [];
-    host.style.height = `${pageHeight}px`;
-    for (let index = 0; index < total; index += 1) {
-      column.style.transform = `translateY(${-index * pageHeight}px)`;
+    for (let index = 0; index < starts.length; index += 1) {
+      const from = starts[index];
+      const to = index + 1 < starts.length ? starts[index + 1] : total;
+      const sliceHeight = Math.max(1, Math.min(pageHeight, to - from));
+      host.style.height = `${sliceHeight}px`;
+      column.style.transform = `translateY(${-from}px)`;
       const canvas = await html2canvas(host, {
         backgroundColor: colors.paper,
         scale: 1,
         width,
-        height: pageHeight,
+        height: sliceHeight,
         windowWidth: width,
-        windowHeight: pageHeight,
+        windowHeight: sliceHeight,
       });
       pages.push(await canvasToPng(canvas));
     }

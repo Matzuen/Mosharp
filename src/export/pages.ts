@@ -16,3 +16,35 @@ export function cursorLine(text: string, offset: number): number {
   }
   return line;
 }
+
+/**
+ * Page start offsets for a PNG export, snapped to block boundaries.
+ *
+ * Cutting every `pageHeight` pixels slices tables, code blocks and images in
+ * half. Blocks are packed greedily instead; only a block taller than a whole
+ * page still gets cut, since there is no alternative.
+ */
+export function pageStarts(
+  blocks: Array<{ top: number; bottom: number }>,
+  pageHeight: number,
+  total: number,
+): number[] {
+  if (pageHeight <= 0 || total <= 0) return [0];
+  const starts = [0];
+  let pageTop = 0;
+  for (const block of blocks) {
+    if (block.bottom <= pageTop || block.bottom - pageTop <= pageHeight) continue;
+    if (block.bottom > total) continue;
+    if (block.top > pageTop) {
+      // Start a fresh page at the block rather than mid-block.
+      starts.push(block.top);
+      pageTop = block.top;
+    }
+    // A block taller than one page has to be sliced anyway.
+    while (block.bottom - pageTop > pageHeight) {
+      pageTop += pageHeight;
+      starts.push(pageTop);
+    }
+  }
+  return starts.filter((value, index) => index === 0 || value > starts[index - 1]);
+}

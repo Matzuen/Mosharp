@@ -1380,6 +1380,12 @@ export const livePreviewTheme = EditorView.baseTheme({
   },
   ".cm-md-mermaid svg, .cm-md-mermaid img": { maxWidth: "100%", height: "auto" },
   ".cm-md-mermaid .vega-embed": { width: "100%" },
+  ".cm-md-diagram-note": {
+    marginTop: "4px",
+    color: "var(--faint)",
+    fontSize: "11px",
+    lineHeight: "1.4",
+  },
   ".cm-md-table-wrap": {
     display: "inline-block",
     width: "100%",

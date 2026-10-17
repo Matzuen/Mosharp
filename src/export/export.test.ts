@@ -4,11 +4,10 @@ function assert(condition: boolean, message: string): void {
   if (!condition) throw new Error(message);
 }
 import { markdownToDocx } from "./docx.ts";
-import { cursorLine, numberedExportName } from "./pages.ts";
+import { cursorLine, numberedExportName, pageStarts } from "./pages.ts";
 import { splitDeck } from "./slides.ts";
 
-const colors = {
-  paper: "#f7f5f0",
+const colors = {  paper: "#f7f5f0",
   ink: "#1c1917",
   accent: "#9a3412",
   line: "#e7e5e4",
@@ -91,5 +90,21 @@ assert(docx[0] === 0x50 && docx[1] === 0x4b, "zip");
 const xml = new TextDecoder().decode(docx);
 assert(xml.includes("Hello"), "docx heading");
 assert(xml.includes(">a<") && xml.includes(">2<"), "docx table");
+
+// PNG pages break between blocks instead of every fixed height.
+const starts = (blocks: Array<[number, number]>, pageHeight: number, total: number) =>
+  pageStarts(
+    blocks.map(([top, bottom]) => ({ top, bottom })),
+    pageHeight,
+    total,
+  );
+assert(starts([], 100, 250).join() === "0", "no blocks still yields one page");
+assert(starts([[0, 50], [50, 90]], 100, 90).join() === "0", "blocks that fit stay on one page");
+assert(
+  starts([[0, 60], [60, 120]], 100, 120).join() === "0,60",
+  "a block that would be cut moves to the next page",
+);
+assert(starts([[0, 250]], 100, 250).join() === "0,100,200", "an oversized block is sliced");
+assert(starts([[0, 100], [100, 150]], 100, 150).join() === "0,100", "exact fit breaks cleanly");
 
 console.log("export ok");
