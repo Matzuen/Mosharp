@@ -67,6 +67,7 @@ import {
 import { DEFAULT_SHORTCUTS, type ShortcutMap } from "../shell/preferences";
 import { richCopyHandler } from "./preview/richCopy";
 import { slashMenuPlugin, slashMenuTheme } from "./preview/slashMenu";
+import { langMenuPlugin } from "./preview/langMenu";
 import { formatToolbarPlugin, formatToolbarTheme } from "./preview/toolbar";
 import { typewriterPlugin } from "./preview/typewriter";
 import { editorTheme } from "./theme";
@@ -248,6 +249,7 @@ function buildExtensions(
     formatToolbarPlugin,
     formatToolbarTheme,
     slashMenuPlugin,
+    langMenuPlugin,
     slashMenuTheme,
     paragraphGutter,
     paragraphGutterRefresh,
