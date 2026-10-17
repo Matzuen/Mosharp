@@ -107,6 +107,8 @@ import {
 import "./App.css";
 
 const BENCHMARK_LINES = 100_000;
+/** Quiet period after the last keystroke before auto-save writes to disk. */
+const AUTO_SAVE_DELAY_MS = 1200;
 
 interface TabRecord {
   id: string;
@@ -201,6 +203,7 @@ export default function App() {
   let host!: HTMLDivElement;
   let editor: EditorController | undefined;
   let dirtyFadeTimer: ReturnType<typeof setTimeout> | null = null;
+  let autoSaveTimer: ReturnType<typeof setTimeout> | null = null;
   let treePollTimer: ReturnType<typeof setInterval> | null = null;
   let sessionTimer: ReturnType<typeof setTimeout> | null = null;
   let scrollUiTimer: ReturnType<typeof setTimeout> | null = null;
@@ -485,10 +488,36 @@ export default function App() {
       current.map((tab) => (tab.id === id ? { ...tab, dirty: value } : tab)),
     );
     setDirty(value);
-    if (value) showDirtyBadge();
-    else setDirtyBadge(false);
+    if (value) {
+      showDirtyBadge();
+      scheduleAutoSave();
+    } else {
+      setDirtyBadge(false);
+    }
     scheduleTitleSync();
     scheduleSessionSave();
+  }
+
+  /**
+   * Auto-save is opt-in: only when the preference is on, the tab already has a
+   * path (an untitled document has nothing to write to), and the edit is on the
+   * active tab. The timer restarts on every keystroke so a burst of typing
+   * results in one write.
+   */
+  function scheduleAutoSave() {
+    if (!prefs().autoSave) return;
+    const tab = activeTab();
+    if (!tab?.path || !activeId) return;
+    const id = activeId;
+    const path = tab.path;
+    if (autoSaveTimer) clearTimeout(autoSaveTimer);
+    autoSaveTimer = setTimeout(() => {
+      autoSaveTimer = null;
+      // The tab may have been switched, renamed or closed while waiting.
+      const current = tabs().find((item) => item.id === id);
+      if (!current?.dirty || current.path !== path || activeId !== id) return;
+      void persist(path, true);
+    }, AUTO_SAVE_DELAY_MS);
   }
 
   function captureActive(): void {
@@ -897,7 +926,7 @@ export default function App() {
     return parts.join("\n");
   }
 
-  async function persist(target: string) {
+  async function persist(target: string, quiet = false) {
     if (!editor) return;
     let imageWarning = "";
     try {
@@ -947,7 +976,8 @@ export default function App() {
       editor.setDocumentPath(target);
       if (imageWarning) {
         setNotice(`${t(locale(), "savedOk")} — ${imageWarning}`);
-      } else {
+      } else if (!quiet) {
+        // Auto-save is silent; a notice on every pause would be noise.
         setNotice(t(locale(), "savedOk"));
       }
       if (prefs().workspaceRoot) void reloadTree();
@@ -1859,6 +1889,7 @@ export default function App() {
       window.removeEventListener("beforeunload", flushSession);
       window.removeEventListener("mosharp-notice", onWidgetNotice);
       if (dirtyFadeTimer) clearTimeout(dirtyFadeTimer);
+      if (autoSaveTimer) clearTimeout(autoSaveTimer);
       if (treePollTimer) clearInterval(treePollTimer);
       if (sessionTimer) clearTimeout(sessionTimer);
       if (scrollUiTimer) clearTimeout(scrollUiTimer);
@@ -1923,6 +1954,15 @@ export default function App() {
     // CodeMirror re-measures on window resize; a zoom change does not fire one,
     // so nudge it or the caret coordinates stay stale until the next edit.
     window.dispatchEvent(new Event("resize"));
+  });
+
+  /** Turning auto-save off must also drop a write that is already scheduled. */
+  createEffect(() => {
+    if (prefs().autoSave) return;
+    if (autoSaveTimer) {
+      clearTimeout(autoSaveTimer);
+      autoSaveTimer = null;
+    }
   });
 
   let appliedEditorPrefs = "";

@@ -128,6 +128,11 @@ export function SettingsDialog(props: {
                 checked={props.prefs.focusMode}
                 onChange={(focusMode) => props.onChange({ focusMode })}
               />
+              <Check
+                label={label("autoSave")}
+                checked={props.prefs.autoSave}
+                onChange={(autoSave) => props.onChange({ autoSave })}
+              />
             </Show>
             <Show when={section() === "markdown"}>
               <Check

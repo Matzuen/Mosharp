@@ -126,6 +126,7 @@ export const zhTW = {
   zoomIn: "放大",
   zoomOut: "縮小",
   zoomReset: "重設縮放",
+  autoSave: "自動儲存（停止輸入後寫入磁碟）",
 };
 
 export const ja = {
@@ -250,6 +251,7 @@ export const ja = {
   zoomIn: "拡大",
   zoomOut: "縮小",
   zoomReset: "ズームをリセット",
+  autoSave: "自動保存（入力が止まるとディスクに書き込む）",
 };
 
 export const de = {
@@ -374,6 +376,7 @@ export const de = {
   zoomIn: "Vergrößern",
   zoomOut: "Verkleinern",
   zoomReset: "Zoom zurücksetzen",
+  autoSave: "Automatisch speichern (nach Tipppause)",
 };
 
 export const fr = {
@@ -498,6 +501,7 @@ export const fr = {
   zoomIn: "Zoom avant",
   zoomOut: "Zoom arrière",
   zoomReset: "Réinitialiser le zoom",
+  autoSave: "Enregistrement automatique (après une pause de frappe)",
 };
 
 export const es = {
@@ -622,4 +626,5 @@ export const es = {
   zoomIn: "Acercar",
   zoomOut: "Alejar",
   zoomReset: "Restablecer zoom",
+  autoSave: "Guardado automático (tras una pausa al escribir)",
 };

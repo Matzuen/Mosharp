@@ -74,6 +74,8 @@ export interface Preferences {
   shortcuts: ShortcutMap;
   /** Whole-window scale, 0.6 – 2.0 in 0.1 steps. */
   zoom: number;
+  /** Write changes to disk automatically a moment after typing stops. */
+  autoSave: boolean;
 }
 
 const KEY = "mosharp.preferences.v1";
@@ -105,6 +107,7 @@ export const defaultPreferences: Preferences = {
   customWords: "",
   shortcuts: { ...DEFAULT_SHORTCUTS },
   zoom: 1,
+  autoSave: false,
 };
 
 export const MIN_ZOOM = 0.6;
@@ -183,6 +186,7 @@ export function loadPreferences(): Preferences {
       customWords: typeof parsed.customWords === "string" ? parsed.customWords : "",
       shortcuts: loadShortcuts(parsed.shortcuts),
       zoom: clampZoom(parsed.zoom ?? defaultPreferences.zoom),
+      autoSave: pickBool(parsed.autoSave, defaultPreferences.autoSave),
     };
   } catch {
     return { ...defaultPreferences, shortcuts: { ...DEFAULT_SHORTCUTS } };

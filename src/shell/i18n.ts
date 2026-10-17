@@ -125,6 +125,7 @@ const messages = {
     zoomIn: "放大",
     zoomOut: "缩小",
     zoomReset: "重置缩放",
+    autoSave: "自动保存（停止输入后写入磁盘）",
   },
   en: {
     brand: "Mosharp",
@@ -249,6 +250,7 @@ const messages = {
     zoomIn: "Zoom In",
     zoomOut: "Zoom Out",
     zoomReset: "Reset Zoom",
+    autoSave: "Auto-save (write to disk after typing stops)",
   },
   "zh-TW": zhTW,
   ja,
