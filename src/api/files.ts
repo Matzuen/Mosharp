@@ -73,6 +73,11 @@ export function renameEntry(from: string, to: string): Promise<void> {
   return invoke("rename_entry", { from, to });
 }
 
+/** Creates a folder; parents are created when missing. */
+export function createFolder(path: string): Promise<void> {
+  return invoke("create_folder", { path });
+}
+
 /** Deletes a file, or a folder that is already empty. */
 export function deleteEntry(path: string): Promise<void> {
   return invoke("delete_entry", { path });

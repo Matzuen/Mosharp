@@ -16,7 +16,9 @@ use watch::{
     recovery_folder, save_recovery_copy, suppress_file_watch, sync_file_watches,
     touch_file_watch_baseline, FileWatchState,
 };
-use workspace::{create_document, delete_entry, rename_entry, reveal_in_folder, list_directory};
+use workspace::{
+    create_document, create_folder, delete_entry, list_directory, rename_entry, reveal_in_folder,
+};
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -53,6 +55,7 @@ pub fn run() {
             list_directory,
             reveal_in_folder,
             create_document,
+            create_folder,
             rename_entry,
             delete_entry,
             search_workspace,

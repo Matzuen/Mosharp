@@ -72,6 +72,16 @@ pub fn create_document(path: String) -> Result<(), String> {
     fs::write(&target, "").map_err(|err| err.to_string())
 }
 
+/// Create a folder (parents included). Refuses to reuse an existing name.
+#[tauri::command]
+pub fn create_folder(path: String) -> Result<(), String> {
+    let target = PathBuf::from(&path);
+    if target.exists() {
+        return Err("同名项已存在".to_string());
+    }
+    fs::create_dir_all(&target).map_err(|err| err.to_string())
+}
+
 /// Rename or move an entry. Refuses to overwrite an existing path.
 #[tauri::command]
 pub fn rename_entry(from: String, to: String) -> Result<(), String> {

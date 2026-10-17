@@ -19,6 +19,7 @@ import { ackClosePrompt, resolveClose, setUnsaved } from "./api/close";
 import { placeImage } from "./api/images";
 import {
   createDocument,
+  createFolder,
   deleteEntry,
   listDirectory,
   normalizeEncoding,
@@ -344,7 +345,21 @@ export default function App() {
     }
   }
 
+  /** Recently closed buffers, newest last, for Ctrl+Shift+T. */
+  const closedTabs: Array<{ path: string | null; text: string }> = [];
+
   let searchInput: HTMLInputElement | undefined;
+
+  /** Reopen the most recently closed tab (file from disk, untitled from memory). */
+  async function reopenTab() {
+    const last = closedTabs.pop();
+    if (!last) return;
+    if (last.path) {
+      await openPathInTab(last.path);
+      return;
+    }
+    createTab(null, last.text, false);
+  }
 
   /** Sidebar search is reachable without the mouse. */
   function focusFileSearch() {
@@ -699,6 +714,13 @@ export default function App() {
     const index = list.findIndex((item) => item.id === id);
     const remaining = list.filter((item) => item.id !== id);
 
+    // Remember the buffer for Ctrl+Shift+T. Capture first when the tab is the
+    // active one, otherwise the snapshot is one edit behind.
+    if (id === activeId) captureActive();
+    const latest = tabs().find((item) => item.id === id) ?? tab;
+    closedTabs.push({ path: latest.path, text: latest.state?.doc.toString() ?? "" });
+    if (closedTabs.length > 5) closedTabs.shift();
+
     if (remaining.length === 0) {
       if (!editor) return;
       const fresh: TabRecord = {
@@ -937,6 +959,30 @@ export default function App() {
       }
       const target = joinPath(folder, name);
       await createDocument(target);
+      await reloadTree();
+      setRenameText(name);
+      setRenaming(target);
+    } catch (error) {
+      setNotice(`Mosharp: ${errorText(error)}`);
+    }
+  }
+
+  /** Create a folder and immediately offer to name it. */
+  async function newFolderIn(folder: string) {
+    if (!isTauri()) {
+      setNotice(t(locale(), "needDesktop"));
+      return;
+    }
+    try {
+      const entries = await listDirectory(folder || prefs().workspaceRoot || "");
+      let name = "新建文件夹";
+      let counter = 2;
+      while (entries.some((entry) => entry.name.toLowerCase() === name.toLowerCase())) {
+        name = `新建文件夹 ${counter}`;
+        counter += 1;
+      }
+      const target = joinPath(folder, name);
+      await createFolder(target);
       await reloadTree();
       setRenameText(name);
       setRenaming(target);
@@ -1943,6 +1989,11 @@ export default function App() {
         focusFileSearch();
         return;
       }
+      if ((event.ctrlKey || event.metaKey) && event.shiftKey && event.key.toLowerCase() === "t") {
+        event.preventDefault();
+        void reopenTab();
+        return;
+      }
       if (event.key === "Escape") {
         // One layer per press, innermost first, and give focus back to the
         // editor so typing works again immediately.
@@ -2795,6 +2846,17 @@ export default function App() {
                 }}
               >
                 {t(locale(), "newFileHere")}
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const path = state().path!;
+                  const folder = state().dir ? path : parentPath(path);
+                  closeMenu();
+                  void newFolderIn(folder);
+                }}
+              >
+                {t(locale(), "newFolder")}
               </button>
               <button
                 type="button"
