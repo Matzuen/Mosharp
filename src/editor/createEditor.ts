@@ -34,6 +34,7 @@ import { linkClickHandler, linkModCursor } from "./preview/links";
 import { setActiveDocumentPath } from "./preview/docPath";
 import { pasteImageHandler } from "./preview/images";
 import { caretAfterLink, isOnlyUrl, linkMarkdown } from "./pasteLink";
+import { blockStarter } from "./autoBlock";
 import { setPandocMath } from "./preview/math";
 import {
   hiddenLineNumberField,
@@ -239,6 +240,25 @@ function buildExtensions(
         if (pasteImageHandler(event, view)) return true;
         return pasteLinkHandler(event, view);
       },
+    }),
+    /**
+     * Typing the closing half of a block marker opens the block right away:
+     * `$$` and ``` produce a fenced block with the caret inside, instead of
+     * requiring the user to type the closing fence by hand.
+     */
+    EditorView.inputHandler.of((view, from, to, text) => {
+      if (from !== to || text.length !== 1) return false;
+      const line = view.state.doc.lineAt(from);
+      const before = view.state.sliceDoc(line.from, from);
+      const after = view.state.sliceDoc(from, line.to);
+      const starter = blockStarter(before, after, text);
+      if (!starter) return false;
+      view.dispatch({
+        changes: { from, to, insert: starter.insert },
+        selection: { anchor: from + starter.caret },
+        userEvent: "input.type",
+      });
+      return true;
     }),
     spellCompartment.of(
       EditorView.contentAttributes.of({
