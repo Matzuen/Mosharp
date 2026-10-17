@@ -51,26 +51,21 @@ export interface LineSlice {
 /**
  * Range to delete when Backspace is pressed on an empty fence body.
  *
- * A fence created by the Enter shortcut starts with an empty body; deleting one
- * character at a time leaves a stray empty code block, so the whole block is
- * removed at once. Returns null when the caret is not inside an empty fence.
+ * Only a block whose body is **exactly one blank line** is removed at once: with
+ * extra blank lines the first presses should delete those lines one by one, the
+ * way they would anywhere else. Returns null when the caret is not in such a
+ * block.
  */
 export function emptyFenceRange(
   lines: LineSlice[],
   index: number,
 ): { from: number; to: number } | null {
-  if (index < 0 || index >= lines.length) return null;
+  if (index < 1 || index >= lines.length - 1) return null;
   if (lines[index].text.trim().length > 0) return null;
-
-  // Blank lines above and below still belong to the block.
-  let open = index;
-  while (open > 0 && lines[open].text.trim().length === 0) open -= 1;
-  let close = index;
-  while (close < lines.length - 1 && lines[close].text.trim().length === 0) close += 1;
-
-  const opener = fenceOpener(lines[open].text);
+  // The blank line must sit directly between the two fences: no walking over
+  // neighbouring blank lines, or Backspace would swallow them all at once.
+  const opener = fenceOpener(lines[index - 1].text);
   if (!opener) return null;
-  if (lines[close].text.trim() !== opener.fence) return null;
-  if (close <= open + 1) return null;
-  return { from: lines[open].from, to: lines[close].to };
+  if (lines[index + 1].text.trim() !== opener.fence) return null;
+  return { from: lines[index - 1].from, to: lines[index + 1].to };
 }

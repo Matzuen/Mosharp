@@ -45,13 +45,20 @@ const range = emptyFenceRange(emptyBlock, 1);
 assert(range?.from === 0, "deletion starts at the opener");
 assert(range?.to === emptyBlock[2].to, "deletion ends at the closing fence");
 
-// Several blank body lines are still one block.
+// Extra blank lines are deleted one at a time, like anywhere else.
 const twoBlanks = slice(["```js", "", "", "```"]);
-assert(emptyFenceRange(twoBlanks, 2)?.to === twoBlanks[3].to, "blank lines are included");
+assert(emptyFenceRange(twoBlanks, 1) === null, "an extra blank line is left to normal Backspace");
+assert(emptyFenceRange(twoBlanks, 2) === null, "the second blank line is too");
+// After those are gone the block itself is removed.
+assert(emptyFenceRange(slice(["```js", "", "```"]), 1) !== null, "the empty block goes next");
 
 // Content means normal Backspace.
 const withCode = slice(["```js", "const x = 1", "```"]);
 assert(emptyFenceRange(withCode, 1) === null, "a block with code is left alone");
+assert(
+  emptyFenceRange(slice(["```js", "const x = 1", "", "```"]), 2) === null,
+  "the blank line after code is ordinary",
+);
 assert(emptyFenceRange(slice(["text", "", "text"]), 1) === null, "ordinary blank lines are not a fence");
 assert(emptyFenceRange(slice(["```js", "", "```"]), 0) === null, "not on a fence line itself");
 assert(emptyFenceRange(slice(["~~~", "", "```"]), 1) === null, "mismatched fences do not count");
