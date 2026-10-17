@@ -28,6 +28,9 @@ assert(
   tocEntries(["~~~", "# hidden", "~~~", "# shown"]).map((entry) => entry.text).join() === "shown",
   "tilde fences are skipped too",
 );
-assert(tocEntries(Array.from({ length: 400 }, () => "# x")).length === 300, "entries are capped");
+assert(
+  tocEntries(Array.from({ length: 1200 }, () => "# x")).length === 1000,
+  "entries are capped at a thousand",
+);
 
 console.log("extras ok");

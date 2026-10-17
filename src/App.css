@@ -638,6 +638,16 @@ textarea {
   background: var(--hover);
 }
 
+/*
+ * A long document can have thousands of headings. `content-visibility` lets the
+ * browser skip layout and paint for the rows that are scrolled out of view, so
+ * the panel stays responsive without a virtual list.
+ */
+.outline-item {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 28px;
+}
+
 .tree-item.current,
 .outline-item.active {
   background: color-mix(in srgb, var(--accent) 14%, transparent);

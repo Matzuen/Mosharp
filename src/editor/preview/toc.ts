@@ -7,8 +7,11 @@ export interface TocEntry {
   line: number;
 }
 
-/** Guard against pathological documents; beyond this the TOC stops growing. */
-export const MAX_ENTRIES = 300;
+/**
+ * Guard against pathological documents. High enough that a long book keeps its
+ * whole table of contents, low enough that one widget can still render it.
+ */
+export const MAX_ENTRIES = 1000;
 
 const FENCE = /^\s{0,3}(`{3,}|~{3,})/;
 const HEADING = /^\s{0,3}(#{1,6})[ \t]+(.+?)[ \t]*#*[ \t]*$/;
