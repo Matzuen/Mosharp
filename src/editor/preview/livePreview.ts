@@ -1110,12 +1110,19 @@ function buildDecorations(view: EditorView): {
     labels: new Map(),
   };
 
+  const front = frontMatterRange(view);
+  // Never decorate inside the front matter: those lines are handled below as a
+  // whole, and letting the generic pass touch them produced stray horizontal
+  // rules and overlapping decorations.
+  const skipTo = front ? front.close.to : -1;
   for (const range of view.visibleRanges) {
-    decorateRange(view, range.from, range.to, focusMode, activeBlock, build);
-    decorateMath(view, range.from, range.to, build);
-    decorateToc(view, range.from, range.to, build);
+    const from = Math.max(range.from, skipTo);
+    if (from > range.to) continue;
+    decorateRange(view, from, range.to, focusMode, activeBlock, build);
+    decorateMath(view, from, range.to, build);
+    decorateToc(view, from, range.to, build);
   }
-  decorateFrontMatter(view, build);
+  if (front) decorateFrontMatter(view, build, front);
 
   for (const [lineNo, classes] of build.lineClasses) {
     const line = view.state.doc.line(lineNo);
@@ -1134,18 +1141,39 @@ function buildDecorations(view: EditorView): {
   }
 }
 
-/** Fold a leading YAML block into a chip unless the caret is inside it. */
-function decorateFrontMatter(view: EditorView, build: PreviewBuild) {
+/** Locate a leading YAML block, independent of where the caret is. */
+function frontMatterRange(view: EditorView) {
   const doc = view.state.doc;
   const limit = Math.min(doc.lines, 101);
   const lines: string[] = [];
   for (let n = 1; n <= limit; n += 1) lines.push(doc.line(n).text);
   const found = frontMatterLines(lines);
-  if (!found) return;
-  const open = doc.line(found.open);
-  const close = doc.line(found.close);
+  if (!found) return null;
+  return { found, open: doc.line(found.open), close: doc.line(found.close) };
+}
+
+/**
+ * Front matter is metadata, never prose: it is either folded into a chip or
+ * shown as raw monospace text while the caret is inside. Either way the rest of
+ * the preview never decorates those lines — otherwise the `---` delimiters turn
+ * into horizontal rules and YAML lines get heading/bold styling.
+ */
+function decorateFrontMatter(
+  view: EditorView,
+  build: PreviewBuild,
+  front: NonNullable<ReturnType<typeof frontMatterRange>>,
+) {
+  const doc = view.state.doc;
+  const { found, open, close } = front;
   if (isCovered(build, open.from, close.to)) return;
-  if (rangeHasCursor(view, open.from, close.to)) return;
+
+  if (rangeHasCursor(view, open.from, close.to)) {
+    for (let n = found.open; n <= found.close; n += 1) {
+      addLineClass(build, n, "cm-md-frontmatter-source");
+    }
+    build.covered.push({ from: open.from, to: close.to });
+    return;
+  }
 
   const head = Decoration.replace({
     widget: new FrontMatterWidget(found.close - found.open - 1, open.from),
@@ -1585,6 +1613,14 @@ export const livePreviewTheme = EditorView.baseTheme({
     color: "var(--muted)",
     fontSize: "11px",
     cursor: "text",
+  },
+  // While the caret is inside the block, the metadata reads as plain text: no
+  // heading sizes, no thematic-break rules.
+  ".cm-md-frontmatter-source": {
+    fontFamily: 'Consolas, "Courier New", monospace',
+    fontSize: "0.92em",
+    color: "var(--muted)",
+    backgroundColor: "var(--code-block)",
   },
   // `[TOC]`
   ".cm-md-toc": {
