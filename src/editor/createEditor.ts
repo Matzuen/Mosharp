@@ -26,7 +26,7 @@ import {
 } from "@codemirror/view";
 import { lineChanges } from "./fidelity";
 import { markdownHighlightStyle } from "./highlight";
-import { countWords } from "./words";
+import { countProseWords } from "./words";
 import { searchPhrases, type EditorLocale } from "./phrases";
 import { flashEffect, flashField } from "./preview/flash";
 import { HighlightExtension } from "./preview/highlightExt";
@@ -392,7 +392,7 @@ export function createEditor(
     stats: () => ({
       lines: view.state.doc.lines,
       chars: view.state.doc.length,
-      words: countWords(view.state.doc.toString()),
+      words: countProseWords(view.state.doc.toString()),
     }),
     getState: () => view.state,
     setState: (state) => {

@@ -1,7 +1,7 @@
-/* Material Dark (Material Dark)
+﻿/* Material Dark (Material Dark)
    scheme: dark
    set: marktext
-   变量说明见同目录 README.md。 */
+   鍙橀噺璇存槑瑙佸悓鐩綍 README.md銆?*/
 html[data-theme="material-dark"] {
   color-scheme: dark;
   --paper: #34393f;
@@ -47,7 +47,7 @@ html[data-theme="material-dark"] {
   --syn-keyword: #c678dd;
   --syn-string: #98c379;
   --syn-number: #d19a66;
-  --syn-comment: #5c6370;
+  --syn-comment: #868e9a;
   --editor-font: "Segoe UI", "Microsoft YaHei UI", "Microsoft YaHei", sans-serif;
   --editor-size: 17px;
 }

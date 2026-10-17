@@ -36,3 +36,23 @@ export function countWords(text: string): number {
   }
   return words;
 }
+
+/** Fenced blocks (``` / ~~~), including an unterminated one that runs to the end. */
+const FENCE = /^ {0,3}(`{3,}|~{3,})[^\n]*\n[\s\S]*?^ {0,3}\1[^\n]*$/gm;
+const UNCLOSED_FENCE = /^ {0,3}(`{3,}|~{3,})[\s\S]*$/m;
+const INLINE_CODE = /`[^`\n]*`/g;
+const FRONTMATTER = /^---\r?\n[\s\S]*?\r?\n---\r?\n/;
+
+/**
+ * Word count for prose: fenced code, inline code and YAML front matter are
+ * excluded, since neither is "writing" and both inflate the number badly.
+ */
+export function countProseWords(text: string): number {
+  if (!text) return 0;
+  const prose = text
+    .replace(FRONTMATTER, "")
+    .replace(FENCE, " ")
+    .replace(UNCLOSED_FENCE, " ")
+    .replace(INLINE_CODE, " ");
+  return countWords(prose);
+}

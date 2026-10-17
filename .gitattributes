@@ -1,0 +1,20 @@
+# Keep every text file LF in the repository, regardless of the platform that
+# checked it out — the editor declares LF and mixed endings created spurious
+# diffs. Windows checkouts previously produced a "LF will be replaced by CRLF"
+# warning for almost every file.
+* text=auto eol=lf
+
+# Binary assets must never be normalised.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.webp binary
+*.ico binary
+*.icns binary
+*.woff binary
+*.woff2 binary
+*.ttf binary
+*.exe binary
+*.msi binary
+*.dmg binary

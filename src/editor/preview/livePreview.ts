@@ -922,11 +922,15 @@ function gutterMarkers(build: PreviewBuild): RangeSet<GutterMarker> {  const ran
 /** Record the source-line range of a collapsed block on its first line. */
 function spanLabel(build: PreviewBuild, doc: Text, firstLine: number, lastLine: number) {
   if (lastLine <= firstLine || firstLine < 1) return;
-  const label = `${firstLine}–${lastLine}`;
-  // The gutter is padded to `digits + 4` characters (see lineNumberConfig in
-  // createEditor). A wider label would be clipped by `overflow: hidden`, so
-  // fall back to the plain number instead of showing a truncated range.
-  if (label.length > String(doc.lines).length + 4) return;
+  // The gutter is padded to `digits + 4` characters (see lineNumbers in
+  // createEditor). A wider label would be clipped by `overflow: hidden`.
+  const budget = String(doc.lines).length + 4;
+  const full = `${firstLine}–${lastLine}`;
+  // `start+count` stays inside the budget for spans that cross a digit boundary
+  // (e.g. 9999–10000), where the full range cannot fit.
+  const compact = `${firstLine}+${lastLine - firstLine + 1}`;
+  const label = full.length <= budget ? full : compact;
+  if (label.length > budget) return;
   build.labels.set(doc.line(firstLine).from, label);
 }
 
