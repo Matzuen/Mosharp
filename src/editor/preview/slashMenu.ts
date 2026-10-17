@@ -2,6 +2,7 @@ import { EditorView, ViewPlugin, type PluginValue, type ViewUpdate } from "@code
 import { placeMenu } from "./menuPlacement";
 import { sourceModeField } from "./modes";
 import { slashItems } from "./toolbar";
+import { viewportZoom } from "./zoom";
 
 class SlashMenu implements PluginValue {
   dom: HTMLDivElement;
@@ -132,8 +133,10 @@ class SlashMenu implements PluginValue {
           { width, height },
           { width: window.innerWidth, height: window.innerHeight },
         );
-        this.dom.style.top = `${box.top}px`;
-        this.dom.style.left = `${box.left}px`;
+        // Viewport pixels in, zoom-local CSS pixels out (see viewportZoom).
+        const zoom = viewportZoom();
+        this.dom.style.top = `${box.top / zoom}px`;
+        this.dom.style.left = `${box.left / zoom}px`;
       },
     });
   }
