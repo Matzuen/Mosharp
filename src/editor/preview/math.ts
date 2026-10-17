@@ -152,7 +152,7 @@ function hideMath(build: MathBuild, from: number, to: number, tex: string, displ
 /**
  * Document ranges that hold raw TeX.
  *
- * Inline markup inside maths must stay literal: while a `$$` block is being
+ * Inside these, inline markup must stay literal: while a `$$` block is being
  * edited, `a^2` would otherwise turn into a superscript and `_x` into italics,
  * so the source on screen would not match the file.
  */
@@ -175,8 +175,7 @@ export function mathRegions(lines: Array<{ from: number; text: string }>): Array
     if (blockFrom >= 0) continue;
 
     const mask = maskCode(line.text);
-    const single = /^ {0,3}\$\$(.+)\$\$\s*$/.exec(line.text);
-    if (single) {
+    if (/^ {0,3}\$\$(.+)\$\$\s*$/.test(line.text)) {
       out.push({ from: line.from, to: line.from + line.text.length });
       continue;
     }
@@ -205,7 +204,8 @@ export function mathRegions(lines: Array<{ from: number; text: string }>): Array
   return out;
 }
 
-function maskCode(line: string): boolean[] {  const mask = Array<boolean>(line.length).fill(false);
+function maskCode(line: string): boolean[] {
+  const mask = Array<boolean>(line.length).fill(false);
   let i = 0;
   while (i < line.length) {
     if (line[i] !== "`") {
@@ -230,7 +230,7 @@ function decoratePandocInline(view: EditorView, lineFrom: number, text: string, 
     if (!tex || tex.length > MAX_TEX) continue;
     const from = lineFrom + match.index;
     const to = from + match[0].length;
-    if (covered(build, from, to) || rangeHasCursor(view, from, to)) continue;
+    if (covered(build, from, to) || cursorStrictlyInside(view, from, to)) continue;
     hideMath(build, from, to, tex, match[0].startsWith("\\["));
   }
 }
@@ -265,7 +265,14 @@ function decorateInline(view: EditorView, lineFrom: number, text: string, build:
     const from = lineFrom + i;
     const to = lineFrom + found + 1;
     const tex = text.slice(i + 1, found);
-    if (!covered(build, from, to) && !rangeHasCursor(view, from, to) && tex.length <= MAX_TEX) {
+    // Inline maths reveals only while the caret is *between* the dollars: a
+    // caret parked just after the closing `$` is writing prose, so the formula
+    // stays rendered. (Block maths does the opposite — see the `$$` branch.)
+    if (
+      !covered(build, from, to) &&
+      !cursorStrictlyInside(view, from, to) &&
+      tex.length <= MAX_TEX
+    ) {
       hideMath(build, from, to, tex, false);
     }
     i = found + 1;

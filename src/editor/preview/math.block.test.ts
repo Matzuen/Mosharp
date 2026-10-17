@@ -79,11 +79,19 @@ assert(probe("$$x^2$$\n", 8).decos.length === 1, "single-line display math rende
 assert(probe("$$x^2$$\n", 3).decos.length === 0, "single-line display math reveals inside");
 assert(probe("a $x^2$ b\n", 9).decos.length === 1, "inline math decorates");
 assert(probe("a $x^2$ b\n", 4).decos.length === 0, "inline math reveals under the caret");
+// Inline maths only reveals with the caret *between* the dollars; sitting just
+// after the closing `$` is ordinary prose and keeps the formula rendered.
+assert(probe("a $x^2$ b\n", 7).decos.length === 1, "inline math renders right after the closing $");
+assert(
+  !probe("a $x^2$ b\n", 9).decos.some((deco) => deco.from === deco.to),
+  "inline math never renders a preview widget",
+);
 
 // An unclosed block stays as source so the marks can be fixed.
 assert(probe("$$\na^2\n", 6).decos.length === 0, "unclosed block stays source");
 
-// Regions mark where inline markup must stay literal (no `^2` superscript).
+// Regions mark where inline markup must stay literal. Only display maths
+// qualifies: inline `$…$` keeps its normal markdown treatment.
 function lines(texts: string[]) {
   let offset = 0;
   return texts.map((text) => {
@@ -97,10 +105,7 @@ const block = mathRegions(lines(["$$", "a^2+b^2=c^2", "$$"]));
 assert(block.length === 1, "a $$ block yields one region");
 assert(block[0].from === 0 && block[0].to === 17, `block covers the whole fence (${block[0].to})`);
 
-const inline = mathRegions(lines(["行内 $x^2$ 说明"]));
-assert(inline.length === 1, "inline math yields one region");
-assert(inline[0].from === 3 && inline[0].to === 8, `inline region covers $x^2$ (${inline[0].from}-${inline[0].to})`);
-
+assert(mathRegions(lines(["行内 $x^2$ 说明"])).length === 1, "inline math is a region too");
 assert(mathRegions(lines(["$$x^2$$"])).length === 1, "single-line display math is a region");
 assert(mathRegions(lines(["代码 `$x$` 不算"])).length === 0, "math inside code is not a region");
 assert(mathRegions(lines(["普通段落"])).length === 0, "prose has no math");
