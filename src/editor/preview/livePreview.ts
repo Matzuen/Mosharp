@@ -193,12 +193,18 @@ class FrontMatterWidget extends WidgetType {
 
 /** `[TOC]` rendered as a clickable outline of the document's headings. */
 class TocWidget extends WidgetType {
-  constructor(readonly from: number) {
+  constructor(
+    readonly from: number,
+    /** Document size at build time; any edit of that size invalidates the DOM. */
+    readonly size: number,
+  ) {
     super();
   }
 
   eq(other: TocWidget) {
-    return other.from === this.from;
+    // `from` alone is not enough: editing a heading must refresh the rendered
+    // list, and a changed document always changes its length.
+    return other.from === this.from && other.size === this.size;
   }
 
   toDOM(view: EditorView) {
@@ -1166,10 +1172,9 @@ function decorateToc(view: EditorView, from: number, to: number, build: PreviewB
     if (line.text.trim().toLowerCase() !== "[toc]") continue;
     if (isCovered(build, line.from, line.to)) continue;
     if (rangeHasCursor(view, line.from, line.to)) continue;
-    const deco = Decoration.replace({ widget: new TocWidget(line.from) }).range(
-      line.from,
-      line.to,
-    );
+    const deco = Decoration.replace({
+      widget: new TocWidget(line.from, view.state.doc.length),
+    }).range(line.from, line.to);
     build.decos.push(deco);
     build.atomic.push(deco);
     build.covered.push({ from: line.from, to: line.to });

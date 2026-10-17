@@ -11,9 +11,12 @@ export function isOnlyUrl(text: string): boolean {
   return trimmed.length > 0 && !/\s/.test(trimmed) && URL_ONLY.test(trimmed);
 }
 
-/** Brackets in the label would end the link text early, so escape them. */
+/**
+ * Brackets in the label would end the link text early, and a multi-line
+ * selection must not put a newline inside `[…]`, so both are normalised.
+ */
 export function linkMarkdown(label: string, url: string): string {
-  const safe = label.replace(/([[\]])/g, "\\$1");
+  const safe = label.replace(/\s+/g, " ").trim().replace(/([[\]])/g, "\\$1");
   return `[${safe}](${url.trim()})`;
 }
 

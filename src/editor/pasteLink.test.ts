@@ -16,6 +16,14 @@ assert(
   linkMarkdown("a[b]c", "https://a.com") === "[a\\[b\\]c](https://a.com)",
   "brackets in the label are escaped",
 );
+assert(
+  linkMarkdown("第一行\n第二行", "https://a.com") === "[第一行 第二行](https://a.com)",
+  "a multi-line selection collapses to one line",
+);
+assert(
+  linkMarkdown("  两边有空格  ", "https://a.com") === "[两边有空格](https://a.com)",
+  "the label is trimmed",
+);
 assert(linkMarkdown("x", " https://a.com ") === "[x](https://a.com)", "the URL is trimmed");
 
 const markdown = "[文档](https://a.com)";
