@@ -18,6 +18,17 @@ assert(joinCells(["A", "B"]) === "| A | B |", "joinCells restores the shape");
 assert(isDelimiterRow("| --- | :-: |"), "delimiter row detected");
 assert(!isDelimiterRow("| A | B |"), "header is not a delimiter");
 
+// An escaped pipe is cell content, not a separator.
+assert(
+  splitCells("| a \\| b | c |").join("|") === "a | b|c",
+  "escaped pipe stays inside its cell",
+);
+assert(joinCells(["a|b", "c"]) === "| a\\|b | c |", "joinCells re-escapes a pipe");
+assert(
+  joinCells(splitCells("| a \\| b | c |")) === "| a \\| b | c |",
+  "escaped pipe round-trips unchanged",
+);
+
 const table = lines(["| A | B |", "| --- | --- |", "| 1 | 2 |"]);
 
 // Header row: inserting below must land after the delimiter, above is impossible.

@@ -120,7 +120,8 @@ const messages = {
     sourceMode: "源码",
     typewriter: "打字机",
     focusMode: "专注",
-    linesChars: (lines: string, chars: string) => `${lines} 行 · ${chars} 字符`,
+    linesChars: (lines: string, chars: string, words: string) =>
+      `${lines} 行 · ${chars} 字符 · ${words} 字`,
   },
   en: {
     brand: "Mosharp",
@@ -240,7 +241,8 @@ const messages = {
     sourceMode: "Source",
     typewriter: "Typewriter",
     focusMode: "Focus",
-    linesChars: (lines: string, chars: string) => `${lines} lines · ${chars} chars`,
+    linesChars: (lines: string, chars: string, words: string) =>
+      `${lines} lines · ${chars} chars · ${words} words`,
   },
   "zh-TW": zhTW,
   ja,
@@ -281,6 +283,6 @@ export function t(locale: Locale, key: MessageKey): string {
   return messages[locale][key];
 }
 
-export function tLines(locale: Locale, lines: string, chars: string): string {
-  return messages[locale].linesChars(lines, chars);
+export function tLines(locale: Locale, lines: string, chars: string, words: string): string {
+  return messages[locale].linesChars(lines, chars, words);
 }

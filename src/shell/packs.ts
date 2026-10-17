@@ -1,6 +1,7 @@
 const lines =
-  (lineUnit: string, charUnit: string) => (count: string, chars: string) =>
-    `${count} ${lineUnit} · ${chars} ${charUnit}`;
+  (lineUnit: string, charUnit: string, wordUnit: string) =>
+  (count: string, chars: string, words: string) =>
+    `${count} ${lineUnit} · ${chars} ${charUnit} · ${words} ${wordUnit}`;
 
 export const zhTW = {
   brand: "Mosharp",
@@ -120,7 +121,8 @@ export const zhTW = {
   sourceMode: "原始碼",
   typewriter: "打字機",
   focusMode: "專注",
-  linesChars: (count: string, chars: string) => `${count} 行 · ${chars} 字元`,
+  linesChars: (count: string, chars: string, words: string) =>
+    `${count} 行 · ${chars} 字元 · ${words} 字`,
 };
 
 export const ja = {
@@ -241,7 +243,7 @@ export const ja = {
   sourceMode: "ソース",
   typewriter: "タイプライター",
   focusMode: "集中",
-  linesChars: lines("行", "文字"),
+  linesChars: lines("行", "文字", "語"),
 };
 
 export const de = {
@@ -362,7 +364,7 @@ export const de = {
   sourceMode: "Quelltext",
   typewriter: "Schreibmaschine",
   focusMode: "Fokus",
-  linesChars: lines("Zeilen", "Zeichen"),
+  linesChars: lines("Zeilen", "Zeichen", "Wörter"),
 };
 
 export const fr = {
@@ -483,7 +485,7 @@ export const fr = {
   sourceMode: "Source",
   typewriter: "Machine à écrire",
   focusMode: "Concentration",
-  linesChars: lines("lignes", "caractères"),
+  linesChars: lines("lignes", "caractères", "mots"),
 };
 
 export const es = {
@@ -604,5 +606,5 @@ export const es = {
   sourceMode: "Código",
   typewriter: "Máquina de escribir",
   focusMode: "Concentración",
-  linesChars: lines("líneas", "caracteres"),
+  linesChars: lines("líneas", "caracteres", "palabras"),
 };

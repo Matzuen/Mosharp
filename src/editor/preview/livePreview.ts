@@ -1,4 +1,5 @@
 import type { SyntaxNode } from "@lezer/common";
+import { redo, undo } from "@codemirror/commands";
 import { syntaxTree } from "@codemirror/language";
 import { RangeSet, StateEffect, StateField, type Range, type Text } from "@codemirror/state";
 import {
@@ -16,12 +17,14 @@ import { imageSuffix, imageUrl, ImageWidget } from "./images";
 import { decorateMath } from "./math";
 import { DiagramWidget } from "./diagramFence";
 import { diagramKind } from "./diagramKind";
+import { notify } from "./notify";
 import { focusModeField, sourceModeField } from "./modes";
 import { quoteDepth } from "./quoteDepth";
 import {
   alignment,
   applyTableOp,
   isDelimiterRow,
+  joinCells,
   splitCells,
   TABLE_MENU,
   TABLE_MENU_KEYS,
@@ -36,6 +39,9 @@ const ICON_ALIGN_LEFT = `<svg ${ICON_ATTRS}><path d="M2 4h12M2 8h8M2 12h12"/></s
 const ICON_ALIGN_CENTER = `<svg ${ICON_ATTRS}><path d="M2 4h12M4 8h8M2 12h12"/></svg>`;
 const ICON_ALIGN_RIGHT = `<svg ${ICON_ATTRS}><path d="M2 4h12M6 8h8M2 12h12"/></svg>`;
 const ICON_TRASH = `<svg ${ICON_ATTRS}><path d="M2.5 4.5h11M6 4.5V3h4v1.5M4.5 4.5l.6 8.5h5.8l.6-8.5M6.7 7v4M9.3 7v4"/></svg>`;
+
+/** Order of the alignment buttons, matching their `TableOp` values. */
+const ALIGN_ORDER = ["left", "center", "right"] as const;
 
 /** Docs at/above this line count: decorate only after scroll settles. */
 const LARGE_DOC_LINES = 8_000;
@@ -190,10 +196,11 @@ class TableWidget extends WidgetType {
     const activateAt = (row: number, col: number) => {
       this.activeRow = row;
       this.activeCol = col;
+      syncActive();
     };
 
     const thead = document.createElement("thead");
-    thead.appendChild(renderRow(header, aligns, "th", 0, commitAt, activateAt));
+    thead.appendChild(renderRow(header, aligns, "th", 0, commitAt, activateAt, view));
     table.appendChild(thead);
 
     const tbody = document.createElement("tbody");
@@ -201,11 +208,33 @@ class TableWidget extends WidgetType {
     for (let i = bodyStart; i < lines.length; i += 1) {
       if (isDelimiterRow(lines[i])) continue;
       tbody.appendChild(
-        renderRow(splitCells(lines[i]), aligns, "td", visualRow, commitAt, activateAt),
+        renderRow(splitCells(lines[i]), aligns, "td", visualRow, commitAt, activateAt, view),
       );
       visualRow += 1;
     }
     table.appendChild(tbody);
+
+    // Highlight the column the next operation would act on, and mirror that
+    // column's alignment on the toolbar.
+    const columns: HTMLElement[][] = [];
+    for (const row of table.querySelectorAll("tr")) {
+      Array.from(row.children).forEach((cell, index) => {
+        (columns[index] ??= []).push(cell as HTMLElement);
+      });
+    }
+    const alignButtons: HTMLButtonElement[] = [];
+    const syncActive = () => {
+      columns.forEach((cells, index) => {
+        const on = index === this.activeCol;
+        for (const cell of cells) cell.classList.toggle("cm-md-cell-active", on);
+      });
+      const current = aligns[this.activeCol] ?? "left";
+      alignButtons.forEach((button, index) => {
+        const on = ALIGN_ORDER[index] === current;
+        button.classList.toggle("active", on);
+        button.setAttribute("aria-pressed", on ? "true" : "false");
+      });
+    };
 
     // Inline SVG rather than an icon font: the reference UI renders glyphs as
     // tofu boxes when the font lacks them, and a missing icon is worse than no
@@ -234,6 +263,7 @@ class TableWidget extends WidgetType {
     for (const [svg, op, title] of alignments) {
       const button = iconButton("cm-md-table-align", svg, title);
       button.addEventListener("click", () => run(op));
+      alignButtons.push(button);
       left.appendChild(button);
     }
 
@@ -363,6 +393,7 @@ class TableWidget extends WidgetType {
 
     chrome.appendChild(menu);
     wrap.append(table, left, chrome);
+    syncActive();
     this.dom = wrap;
     return wrap;
   }
@@ -385,11 +416,13 @@ function renderRow(
   visualRow: number,
   onCommit: (row: number, col: number, text: string) => void,
   onActivate: (row: number, col: number) => void,
+  view: EditorView,
 ) {
   const row = document.createElement("tr");
   for (let i = 0; i < cells.length; i += 1) {
     const cell = document.createElement(tag);
-    const original = cells[i];
+    // Mutable: it tracks the last committed value so "dirty" stays meaningful.
+    let original = cells[i];
     cell.className = "cm-md-cell";
     cell.textContent = original;
     cell.contentEditable = "true";
@@ -401,11 +434,25 @@ function renderRow(
     });
     cell.addEventListener("focusin", () => onActivate(visualRow, i));
     const commit = () => {
-      const next = (cell.textContent ?? "").replace(/\n/g, " ").replace(/\|/g, "").trim();
-      if (next !== original) onCommit(visualRow, i, next);
+      // Cell text is unescaped here; `joinCells` adds the `\|` escaping when the
+      // row is written back, so a pipe survives a round trip.
+      const next = (cell.textContent ?? "").replace(/\n/g, " ").trim();
+      if (next === original) return;
+      original = next;
+      onCommit(visualRow, i, next);
     };
     cell.addEventListener("keydown", (event) => {
       event.stopPropagation();
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "z") {
+        // Native undo only covers the in-cell edit. Once committed, the edit
+        // lives in the document, so route undo/redo to the editor history —
+        // otherwise the cell and the source silently diverge.
+        if ((cell.textContent ?? "") !== original) return;
+        event.preventDefault();
+        if (event.shiftKey) redo(view);
+        else undo(view);
+        return;
+      }
       if (event.key === "Enter" && !event.shiftKey) {
         event.preventDefault();
         commit();
@@ -453,7 +500,10 @@ function runTableOp(
 
   if (op === "copy") {
     const text = view.state.doc.sliceString(tableFrom, tableTo);
-    void navigator.clipboard?.writeText(text).catch(() => {});
+    navigator.clipboard?.writeText(text).then(
+      () => notify("已复制表格"),
+      () => notify("复制失败：剪贴板不可用"),
+    );
     return false;
   }
 
@@ -493,8 +543,10 @@ function commitCell(view: EditorView, pos: number, visualRow: number, col: numbe
   while (cells.length <= col) cells.push("");
   if (cells[col] === text) return;
   cells[col] = text;
+  // `joinCells` escapes any pipe the cell text contains, so the row is written
+  // exactly once with the escaping in a single place.
   view.dispatch({
-    changes: { from: target.from, to: target.to, insert: `| ${cells.join(" | ")} |` },
+    changes: { from: target.from, to: target.to, insert: joinCells(cells) },
   });
 }
 
@@ -870,7 +922,12 @@ function gutterMarkers(build: PreviewBuild): RangeSet<GutterMarker> {  const ran
 /** Record the source-line range of a collapsed block on its first line. */
 function spanLabel(build: PreviewBuild, doc: Text, firstLine: number, lastLine: number) {
   if (lastLine <= firstLine || firstLine < 1) return;
-  build.labels.set(doc.line(firstLine).from, `${firstLine}–${lastLine}`);
+  const label = `${firstLine}–${lastLine}`;
+  // The gutter is padded to `digits + 4` characters (see lineNumberConfig in
+  // createEditor). A wider label would be clipped by `overflow: hidden`, so
+  // fall back to the plain number instead of showing a truncated range.
+  if (label.length > String(doc.lines).length + 4) return;
+  build.labels.set(doc.line(firstLine).from, label);
 }
 
 const emptyPreview = {
@@ -1220,6 +1277,26 @@ export const livePreviewTheme = EditorView.baseTheme({
     fontWeight: "700",
   },
   ".cm-md-ol": { fontVariantNumeric: "tabular-nums" },
+  ".cm-md-fence-wrap": {
+    display: "inline-flex",
+    alignItems: "center",
+    gap: "2px",
+  },
+  ".cm-md-fence-copy": {
+    color: "var(--faint)",
+    fontFamily: 'Consolas, "Courier New", monospace',
+    fontSize: "11px",
+    border: "none",
+    background: "transparent",
+    padding: "0 4px",
+    cursor: "pointer",
+    opacity: "0",
+    transition: "opacity 120ms ease",
+  },
+  ".cm-md-fence-wrap:hover .cm-md-fence-copy, .cm-md-fence-wrap:focus-within .cm-md-fence-copy":
+    {
+      opacity: "1",
+    },
   ".cm-md-fence": {
     color: "var(--faint)",
     fontFamily: 'Consolas, "Courier New", monospace',
@@ -1309,8 +1386,14 @@ export const livePreviewTheme = EditorView.baseTheme({
   // Both toolbars float above the block instead of taking part in the layout:
   // an in-flow bar made the whole table grow the moment the caret entered it,
   // shifting everything below.
+  //
+  // They stay rendered but invisible instead of `display: none` so the buttons
+  // remain in the Tab order; `:focus-within` then reveals them for keyboard
+  // users, who cannot hover.
   ".cm-md-table-left, .cm-md-table-chrome": {
-    display: "none",
+    display: "flex",
+    opacity: "0",
+    pointerEvents: "none",
     position: "absolute",
     top: "0",
     // Sit entirely above the table rather than straddling its top border.
@@ -1321,12 +1404,14 @@ export const livePreviewTheme = EditorView.baseTheme({
     zIndex: "14",
     gap: "4px",
     alignItems: "center",
+    transition: "opacity 120ms ease",
   },
   ".cm-md-table-left": { left: "0" },
   ".cm-md-table-chrome": { right: "8px" },
   ".cm-md-table-wrap:hover .cm-md-table-left, .cm-md-table-wrap:focus-within .cm-md-table-left, .cm-md-table-wrap.cm-md-table-open .cm-md-table-left, .cm-md-table-wrap:hover .cm-md-table-chrome, .cm-md-table-wrap:focus-within .cm-md-table-chrome, .cm-md-table-wrap.cm-md-table-open .cm-md-table-chrome":
     {
-      display: "flex",
+      opacity: "1",
+      pointerEvents: "auto",
     },
   ".cm-md-table-align, .cm-md-table-action": {
     display: "inline-flex",
@@ -1343,7 +1428,19 @@ export const livePreviewTheme = EditorView.baseTheme({
     whiteSpace: "nowrap",
     boxShadow: "0 2px 8px rgba(28,25,23,0.10)",
   },
+  ".cm-md-table-align.active": {
+    borderColor: "var(--accent)",
+    color: "var(--accent)",
+  },
   ".cm-md-table-align svg, .cm-md-table-action svg": { display: "block" },
+  ".cm-md-table-align:focus-visible, .cm-md-table-action:focus-visible, .cm-md-table-more:focus-visible, .cm-md-table-menu-item:focus-visible, .cm-md-cell:focus-visible":
+    {
+      outline: "2px solid var(--accent)",
+      outlineOffset: "1px",
+    },
+  ".cm-md-table-widget th.cm-md-cell-active, .cm-md-table-widget td.cm-md-cell-active": {
+    background: "color-mix(in srgb, var(--accent) 10%, transparent)",
+  },
   ".cm-md-table-align:hover, .cm-md-table-action:hover, .cm-md-table-more:hover": {
     color: "var(--ink)",
     background: "var(--hover)",

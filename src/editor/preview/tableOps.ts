@@ -55,11 +55,35 @@ export const TABLE_MENU_KEYS: Record<string, TableOp> = {
   ArrowRight: "col-move-right",
 };
 
+/**
+ * Split one table row into cells.
+ *
+ * `\|` is an escaped pipe (GFM allows it inside a cell), so a naive split on
+ * "|" both mis-renders such tables and loses the escape when the row is written
+ * back. The returned cells carry the literal character; `joinCells` re-escapes.
+ */
 export function splitCells(line: string): string[] {
-  let text = line.trim();
-  if (text.startsWith("|")) text = text.slice(1);
-  if (text.endsWith("|")) text = text.slice(0, -1);
-  return text.split("|").map((cell) => cell.trim());
+  const text = line.trim();
+  const cells: string[] = [];
+  let current = "";
+  let i = text.startsWith("|") ? 1 : 0;
+  for (; i < text.length; i += 1) {
+    const ch = text[i];
+    if (ch === "\\" && text[i + 1] === "|") {
+      current += "|";
+      i += 1;
+      continue;
+    }
+    if (ch === "|") {
+      cells.push(current.trim());
+      current = "";
+      continue;
+    }
+    current += ch;
+  }
+  // A trailing pipe ends the row; it does not start an empty cell.
+  if (current.trim().length > 0 || cells.length === 0) cells.push(current.trim());
+  return cells;
 }
 
 export function isDelimiterRow(line: string): boolean {
@@ -68,7 +92,7 @@ export function isDelimiterRow(line: string): boolean {
 }
 
 export function joinCells(cells: string[]): string {
-  return `| ${cells.join(" | ")} |`;
+  return `| ${cells.map((cell) => cell.replace(/\|/g, "\\|")).join(" | ")} |`;
 }
 
 export function alignment(cell: string): "left" | "center" | "right" {

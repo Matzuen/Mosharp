@@ -216,6 +216,7 @@ export default function App() {
   const [dirtyBadge, setDirtyBadge] = createSignal(false);
   const [lines, setLines] = createSignal(1);
   const [chars, setChars] = createSignal(0);
+  const [words, setWords] = createSignal(0);
   const [notice, setNotice] = createSignal("");
   const [outline, setOutline] = createSignal<OutlineItem[]>([]);
   const [activeHeading, setActiveHeading] = createSignal(-1);
@@ -431,6 +432,7 @@ export default function App() {
     const stats = editor.stats();
     setLines(stats.lines);
     setChars(stats.chars);
+    setWords(stats.words);
   }
 
   function refreshOutline() {
@@ -1693,6 +1695,12 @@ export default function App() {
     window.addEventListener("keydown", onKeyDown, true);
     window.addEventListener("click", closeMenu);
     window.addEventListener("beforeunload", flushSession);
+    // Widgets live inside the editor and have no access to the notice signal.
+    const onWidgetNotice = (event: Event) => {
+      const detail = (event as CustomEvent<string>).detail;
+      if (typeof detail === "string" && detail) setNotice(detail);
+    };
+    window.addEventListener("mosharp-notice", onWidgetNotice);
 
     let unlistenClose: (() => void) | undefined;
     let unlistenChange: (() => void) | undefined;
@@ -1809,6 +1817,7 @@ export default function App() {
       window.removeEventListener("keydown", onKeyDown, true);
       window.removeEventListener("click", closeMenu);
       window.removeEventListener("beforeunload", flushSession);
+      window.removeEventListener("mosharp-notice", onWidgetNotice);
       if (dirtyFadeTimer) clearTimeout(dirtyFadeTimer);
       if (treePollTimer) clearInterval(treePollTimer);
       if (sessionTimer) clearTimeout(sessionTimer);
@@ -2097,6 +2106,7 @@ export default function App() {
             locale(),
             lines().toLocaleString(locale()),
             chars().toLocaleString(locale()),
+            words().toLocaleString(locale()),
           )}
         </span>
         <span class={dirty() ? "status-dirty" : "status-clean"}>

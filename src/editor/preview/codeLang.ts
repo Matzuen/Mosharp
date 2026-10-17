@@ -1,4 +1,6 @@
+import { syntaxTree } from "@codemirror/language";
 import { EditorView, WidgetType } from "@codemirror/view";
+import { notify } from "./notify";
 
 /** Languages offered on the fence chip. Mermaid is a diagram, not a highlighter. */
 export const FENCE_LANGS = [
@@ -110,6 +112,18 @@ function openLangMenu(view: EditorView, anchor: HTMLElement, lineFrom: number) {
   window.addEventListener("mousedown", onPointer, true);
 }
 
+/** Body of the fenced block that starts at `pos`, or null if there is none. */
+function fencedSource(view: EditorView, pos: number): string | null {
+  let node = syntaxTree(view.state).resolveInner(pos, 1);
+  while (node && node.name !== "FencedCode") node = node.parent as typeof node;
+  if (!node) return null;
+  const first = view.state.doc.lineAt(node.from).number;
+  const last = view.state.doc.lineAt(Math.max(node.from, node.to - 1)).number;
+  const lines: string[] = [];
+  for (let n = first + 1; n < last; n += 1) lines.push(view.state.doc.line(n).text);
+  return lines.join("\n");
+}
+
 /** Language chip on a fence line. The code itself stays editable and highlighted. */
 export class FenceLangWidget extends WidgetType {
   constructor(readonly label: string) {
@@ -121,6 +135,9 @@ export class FenceLangWidget extends WidgetType {
   }
 
   toDOM(view: EditorView) {
+    const wrap = document.createElement("span");
+    wrap.className = "cm-md-fence-wrap";
+
     const button = document.createElement("button");
     button.type = "button";
     button.className = "cm-md-fence";
@@ -134,7 +151,30 @@ export class FenceLangWidget extends WidgetType {
       const lineFrom = pos == null ? view.state.selection.main.head : view.state.doc.lineAt(pos).from;
       openLangMenu(view, button, lineFrom);
     });
-    return button;
+    wrap.appendChild(button);
+
+    const copy = document.createElement("button");
+    copy.type = "button";
+    copy.className = "cm-md-fence-copy";
+    copy.textContent = "复制";
+    copy.title = "复制代码";
+    copy.setAttribute("aria-label", "复制代码");
+    copy.addEventListener("mousedown", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+    });
+    copy.addEventListener("click", () => {
+      const pos = view.posAtDOM(wrap);
+      if (pos == null) return;
+      const code = fencedSource(view, pos);
+      if (code == null) return;
+      navigator.clipboard?.writeText(code).then(
+        () => notify("已复制代码"),
+        () => notify("复制失败：剪贴板不可用"),
+      );
+    });
+    wrap.appendChild(copy);
+    return wrap;
   }
 
   ignoreEvent() {

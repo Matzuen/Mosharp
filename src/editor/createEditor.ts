@@ -26,6 +26,7 @@ import {
 } from "@codemirror/view";
 import { lineChanges } from "./fidelity";
 import { markdownHighlightStyle } from "./highlight";
+import { countWords } from "./words";
 import { searchPhrases, type EditorLocale } from "./phrases";
 import { flashEffect, flashField } from "./preview/flash";
 import { HighlightExtension } from "./preview/highlightExt";
@@ -106,6 +107,7 @@ const hello = "world"
 export interface EditorStats {
   lines: number;
   chars: number;
+  words: number;
 }
 
 export interface EditorController {
@@ -154,7 +156,13 @@ function buildExtensions(
 ): Extension[] {
   return [
     phraseCompartment.of(EditorState.phrases.of(searchPhrases(locale))),
-    lineNumbers(),
+    // Reserve room for a "start–end" span label on collapsed blocks (e.g.
+    // 11–13). The gutter is sized from `initialSpacer`, so padding every number
+    // to `digits + 4` figure spaces widens it without shifting the digits.
+    lineNumbers({
+      formatNumber: (lineNo: number, state: EditorState) =>
+        String(lineNo).padStart(String(state.doc.lines).length + 4, "\u2007"),
+    }),
     hiddenLineNumberField,
     highlightActiveLineGutter(),
     highlightActiveLine(),
@@ -384,6 +392,7 @@ export function createEditor(
     stats: () => ({
       lines: view.state.doc.lines,
       chars: view.state.doc.length,
+      words: countWords(view.state.doc.toString()),
     }),
     getState: () => view.state,
     setState: (state) => {
