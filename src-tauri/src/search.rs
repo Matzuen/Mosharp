@@ -101,7 +101,19 @@ fn scan_file(path: &Path, needle: &str, budget: usize) -> Vec<TextMatch> {
 /// front-end filter could never see files inside folders the user has not
 /// expanded — which is exactly what this fixes.
 #[tauri::command]
-pub fn search_workspace(
+pub async fn search_workspace(
+    root: String,
+    query: String,
+    limit: Option<usize>,
+) -> Result<WorkspaceSearch, String> {
+    // Reading thousands of files must not run on the main thread, or the window
+    // stutters while the search is in flight.
+    tauri::async_runtime::spawn_blocking(move || search_workspace_blocking(root, query, limit))
+        .await
+        .map_err(|err| err.to_string())?
+}
+
+fn search_workspace_blocking(
     root: String,
     query: String,
     limit: Option<usize>,
@@ -213,7 +225,7 @@ mod tests {
         write(&root.join("deep/nested/note.md"), "# note\n");
         write(&root.join("node_modules/skip.md"), "# skip\n");
 
-        let found = search_workspace(root.to_string_lossy().into_owned(), "note".into(), None)
+        let found = search_workspace_blocking(root.to_string_lossy().into_owned(), "note".into(), None)
             .expect("search");
         assert_eq!(found.names.len(), 1, "nested match found");
         assert!(found.names[0].path.ends_with("note.md"));
@@ -226,7 +238,7 @@ mod tests {
         write(&root.join("a.md"), "第一行\nNeedle 在这一行\n");
         write(&root.join("node_modules/b.md"), "Needle\n");
 
-        let found = search_workspace(root.to_string_lossy().into_owned(), "needle".into(), None)
+        let found = search_workspace_blocking(root.to_string_lossy().into_owned(), "needle".into(), None)
             .expect("search");
         assert_eq!(found.matches.len(), 1, "only the real document matches");
         assert_eq!(found.matches[0].line, 2);
@@ -238,7 +250,7 @@ mod tests {
     fn empty_query_returns_nothing() {
         let root = temp_root("empty");
         write(&root.join("a.md"), "x");
-        let found = search_workspace(root.to_string_lossy().into_owned(), "   ".into(), None)
+        let found = search_workspace_blocking(root.to_string_lossy().into_owned(), "   ".into(), None)
             .expect("search");
         assert!(found.names.is_empty() && found.matches.is_empty());
         fs::remove_dir_all(&root).ok();

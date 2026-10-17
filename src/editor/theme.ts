@@ -32,7 +32,9 @@ export const editorTheme = EditorView.theme({
   ".cm-content": {
     maxWidth: "var(--content-width, 780px)",
     margin: "0 auto",
-    padding: "32px 28px 40vh",
+    // `vh` is not scaled by the window zoom while `zoom` is, so divide to keep
+    // the bottom breathing room proportional at every zoom level.
+    padding: "32px 28px calc(40vh / var(--ui-zoom, 1))",
     caretColor: "var(--ink)",
   },
   ".cm-gutters": {

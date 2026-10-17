@@ -558,10 +558,47 @@ textarea {
 
 /* Search results */
 .side-section {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
   margin: 10px 12px 4px;
   color: var(--muted);
   font-size: 11px;
   letter-spacing: 0.04em;
+}
+
+.match-nav {
+  display: flex;
+  gap: 2px;
+}
+
+.match-nav button {
+  width: 18px;
+  height: 18px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 11px;
+  line-height: 1;
+}
+
+.match-nav button:hover {
+  background: var(--hover);
+  color: var(--ink);
+}
+
+.match-row.active {
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+}
+
+.match-text mark {
+  background: color-mix(in srgb, var(--accent) 32%, transparent);
+  color: inherit;
+  border-radius: 3px;
+  padding: 0 1px;
 }
 
 .match-row {

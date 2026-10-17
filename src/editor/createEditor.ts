@@ -33,6 +33,7 @@ import { HighlightExtension } from "./preview/highlightExt";
 import { linkClickHandler, linkModCursor } from "./preview/links";
 import { setActiveDocumentPath } from "./preview/docPath";
 import { pasteImageHandler } from "./preview/images";
+import { caretAfterLink, isOnlyUrl, linkMarkdown } from "./pasteLink";
 import { setPandocMath } from "./preview/math";
 import {
   hiddenLineNumberField,
@@ -147,6 +148,25 @@ export interface EditorController {
   run: (action: (view: EditorView) => void) => void;
 }
 
+/**
+ * Pasting a URL onto a selection wraps it as a link instead of replacing it.
+ * Only a bare http(s) URL qualifies, so ordinary text paste is untouched.
+ */
+function pasteLinkHandler(event: ClipboardEvent, view: EditorView): boolean {
+  const text = event.clipboardData?.getData("text/plain") ?? "";
+  if (!isOnlyUrl(text)) return false;
+  const range = view.state.selection.main;
+  if (range.empty) return false;
+  event.preventDefault();
+  const label = view.state.sliceDoc(range.from, range.to);
+  view.dispatch({
+    changes: { from: range.from, to: range.to, insert: linkMarkdown(label, text) },
+    selection: { anchor: range.from + caretAfterLink(label, text) },
+    userEvent: "input.paste",
+  });
+  return true;
+}
+
 function buildExtensions(
   hooks: {
     onEdit: () => void;
@@ -215,7 +235,10 @@ function buildExtensions(
     flashField,
     EditorView.lineWrapping,
     EditorView.domEventHandlers({
-      paste: pasteImageHandler,
+      paste: (event, view) => {
+        if (pasteImageHandler(event, view)) return true;
+        return pasteLinkHandler(event, view);
+      },
     }),
     spellCompartment.of(
       EditorView.contentAttributes.of({

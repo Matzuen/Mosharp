@@ -242,12 +242,15 @@ export default function App() {
   const [settingsOpen, setSettingsOpen] = createSignal(false);
   const [dropHover, setDropHover] = createSignal(false);
   const [fileQuery, setFileQuery] = createSignal("");
+  const [outlineQuery, setOutlineQuery] = createSignal("");
   const [searchHits, setSearchHits] = createSignal<WorkspaceSearch>({
     names: [],
     matches: [],
     truncated: false,
   });
   const [searchBusy, setSearchBusy] = createSignal(false);
+  /** Index of the content match the up/down buttons are sitting on. */
+  const [matchIndex, setMatchIndex] = createSignal(-1);
   const [recent, setRecent] = createSignal<RecentEntry[]>(loadRecent());
 
   const locale = createMemo(() => prefs().locale);
@@ -2014,6 +2017,13 @@ export default function App() {
   }
 
   const flatTree = createMemo(() => flattenTree(tree()));
+  /** Outline filtered by the panel's own search box. */
+  const visibleOutline = createMemo(() => {
+    const query = outlineQuery().trim().toLowerCase();
+    const items = outline();
+    if (!query) return items;
+    return items.filter((item) => item.text.toLowerCase().includes(query));
+  });
   const visibleFiles = createMemo(() => {
     const query = fileQuery().trim().toLowerCase();
     const nodes = flatTree();
@@ -2086,6 +2096,7 @@ export default function App() {
         .then((result) => {
           if (seq !== searchSeq) return;
           setSearchHits(result);
+          setMatchIndex(-1);
         })
         .catch(() => {
           if (seq !== searchSeq) return;
@@ -2100,6 +2111,33 @@ export default function App() {
   async function openSearchHit(path: string, line: number) {
     await openPathInTab(path);
     editor?.jumpToLine(line);
+  }
+
+  /** Up/down buttons walk the content matches in order, wrapping at the ends. */
+  function stepMatch(delta: number) {
+    const list = searchHits().matches;
+    if (list.length === 0) return;
+    const next = (((matchIndex() + delta) % list.length) + list.length) % list.length;
+    setMatchIndex(next);
+    void openSearchHit(list[next].path, list[next].line);
+  }
+
+  /** Split a preview line so the matched term can be highlighted. */
+  function highlightParts(text: string, query: string) {
+    const needle = query.trim().toLowerCase();
+    if (!needle) return [{ text, hit: false }];
+    const parts: Array<{ text: string; hit: boolean }> = [];
+    const lower = text.toLowerCase();
+    let at = 0;
+    while (at <= text.length - needle.length) {
+      const found = lower.indexOf(needle, at);
+      if (found < 0) break;
+      if (found > at) parts.push({ text: text.slice(at, found), hit: false });
+      parts.push({ text: text.slice(found, found + needle.length), hit: true });
+      at = found + needle.length;
+    }
+    if (at < text.length) parts.push({ text: text.slice(at), hit: false });
+    return parts.length > 0 ? parts : [{ text, hit: false }];
   }
 
   let appliedEditorPrefs = "";
@@ -2264,20 +2302,35 @@ export default function App() {
                 }}
               />
             </Show>
+            <Show when={prefs().panelMode === "outline"}>
+              <input
+                class="side-search"
+                type="search"
+                placeholder={t(locale(), "filterOutline")}
+                value={outlineQuery()}
+                onInput={(event) => setOutlineQuery(event.currentTarget.value)}
+                onKeyDown={(event) => {
+                  if (event.key !== "Escape") return;
+                  event.preventDefault();
+                  if (outlineQuery()) setOutlineQuery("");
+                  else event.currentTarget.blur();
+                }}
+              />
+            </Show>
             <div class="side-body" role="tree" aria-label={t(locale(), "files")} onKeyDown={treeKeyDown}>
               <Show
                 when={prefs().panelMode === "files"}
                 fallback={
                   <Show
-                    when={outline().length > 0}
+                    when={visibleOutline().length > 0}
                     fallback={<p class="side-empty">{t(locale(), "emptyOutline")}</p>}
                   >
-                    <For each={outline()}>
-                      {(item, index) => (
+                    <For each={visibleOutline()}>
+                      {(item) => (
                         <button
                           type="button"
                           class={`outline-item level-${item.level}${
-                            activeHeading() === index() ? " active" : ""
+                            outline()[activeHeading()]?.line === item.line ? " active" : ""
                           }`}
                           style={{ "padding-left": `${10 + (item.level - 1) * 12}px` }}
                           title={item.text}
@@ -2314,21 +2367,46 @@ export default function App() {
                     </For>
                     <Show when={searchHits().matches.length > 0}>
                       <p class="side-section">
-                        {t(locale(), "contentMatches")} ({searchHits().matches.length})
+                        <span>
+                          {t(locale(), "contentMatches")} ({searchHits().matches.length})
+                        </span>
+                        <span class="match-nav">
+                          <button
+                            type="button"
+                            title={t(locale(), "previous")}
+                            onClick={() => stepMatch(-1)}
+                          >
+                            ↑
+                          </button>
+                          <button
+                            type="button"
+                            title={t(locale(), "next")}
+                            onClick={() => stepMatch(1)}
+                          >
+                            ↓
+                          </button>
+                        </span>
                       </p>
                       <For each={searchHits().matches}>
-                        {(hit) => (
+                        {(hit, index) => (
                           <button
                             type="button"
                             role="treeitem"
-                            class="match-row"
+                            class={`match-row${index() === matchIndex() ? " active" : ""}`}
                             title={`${hit.path}:${hit.line}`}
-                            onClick={() => void openSearchHit(hit.path, hit.line)}
+                            onClick={() => {
+                              setMatchIndex(index());
+                              void openSearchHit(hit.path, hit.line);
+                            }}
                           >
                             <span class="match-file">
                               {hit.path.split(/[\\/]/).pop()}:{hit.line}
                             </span>
-                            <span class="match-text">{hit.text}</span>
+                            <span class="match-text">
+                              <For each={highlightParts(hit.text, fileQuery())}>
+                                {(part) => (part.hit ? <mark>{part.text}</mark> : <>{part.text}</>)}
+                              </For>
+                            </span>
                           </button>
                         )}
                       </For>

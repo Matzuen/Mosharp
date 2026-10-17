@@ -130,6 +130,9 @@ export const zhTW = {
   contentMatches: "內容符合",
   noMatches: "沒有符合的項目",
   searchTruncated: "結果太多，只顯示前面一部分",
+  filterOutline: "篩選標題",
+  previous: "上一個",
+  next: "下一個",
 };
 
 export const ja = {
@@ -258,6 +261,9 @@ export const ja = {
   contentMatches: "本文中の一致",
   noMatches: "一致する項目がありません",
   searchTruncated: "結果が多すぎます。先頭のみ表示しています",
+  filterOutline: "見出しを絞り込む",
+  previous: "前へ",
+  next: "次へ",
 };
 
 export const de = {
@@ -386,6 +392,9 @@ export const de = {
   contentMatches: "Im Text",
   noMatches: "Keine Treffer",
   searchTruncated: "Zu viele Treffer — nur die ersten werden gezeigt",
+  filterOutline: "Überschriften filtern",
+  previous: "Zurück",
+  next: "Weiter",
 };
 
 export const fr = {
@@ -514,6 +523,9 @@ export const fr = {
   contentMatches: "Dans le contenu",
   noMatches: "Aucun résultat",
   searchTruncated: "Trop de résultats — seuls les premiers sont affichés",
+  filterOutline: "Filtrer les titres",
+  previous: "Précédent",
+  next: "Suivant",
 };
 
 export const es = {
@@ -642,4 +654,7 @@ export const es = {
   contentMatches: "En el contenido",
   noMatches: "Sin resultados",
   searchTruncated: "Demasiados resultados: solo se muestran los primeros",
+  filterOutline: "Filtrar títulos",
+  previous: "Anterior",
+  next: "Siguiente",
 };
