@@ -13,6 +13,7 @@ import {
   indentOnInput,
   indentUnit,
   syntaxHighlighting,
+  syntaxTree,
 } from "@codemirror/language";
 import { highlightSelectionMatches, search, searchKeymap } from "@codemirror/search";
 import { Compartment, EditorState, Transaction, type Extension } from "@codemirror/state";
@@ -249,6 +250,16 @@ function buildExtensions(
     EditorView.inputHandler.of((view, from, to, text) => {
       if (from !== to || text.length !== 1) return false;
       const line = view.state.doc.lineAt(from);
+      // Typing a fence *inside* an existing code block must not spawn another
+      // block: only a fence that starts on the current line counts.
+      let node = syntaxTree(view.state).resolveInner(from, -1);
+      while (node) {
+        if (node.name === "FencedCode" || node.name === "CodeBlock") {
+          if (view.state.doc.lineAt(node.from).number < line.number) return false;
+          break;
+        }
+        node = node.parent as typeof node;
+      }
       const before = view.state.sliceDoc(line.from, from);
       const after = view.state.sliceDoc(from, line.to);
       const starter = blockStarter(before, after, text);

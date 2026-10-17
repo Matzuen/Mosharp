@@ -162,6 +162,14 @@ function joinPath(folder: string, name: string): string {
   return `${folder.replace(/[\\/]+$/, "")}${separator}${name}`;
 }
 
+/** True when `path` is `folder` itself or somewhere below it. */
+export function isInside(path: string, folder: string): boolean {
+  const normalize = (value: string) => value.replace(/\\/g, "/").toLowerCase();
+  const child = normalize(path);
+  const root = normalize(folder).replace(/\/+$/, "");
+  return child === root || child.startsWith(`${root}/`);
+}
+
 function fileTitle(path: string | null, dirty: boolean, untitled: string): string {
   return `${dirty ? "● " : ""}${documentName(path, untitled)} — Mosharp`;
 }
@@ -950,12 +958,21 @@ export default function App() {
     if (to === from) return;
     try {
       await renameEntry(from, to);
+      // Renaming a folder must also repoint every tab inside it, otherwise those
+      // tabs keep writing to paths that no longer exist.
+      const repoint = (path: string | null) =>
+        path && isInside(path, from) ? `${to}${path.slice(from.length)}` : null;
+      const activePath = activeTab()?.path ?? null;
+      const activeNext = repoint(activePath);
       setTabs((current) =>
-        current.map((tab) => (samePath(tab.path, from) ? { ...tab, path: to } : tab)),
+        current.map((tab) => {
+          const next = repoint(tab.path);
+          return next ? { ...tab, path: next } : tab;
+        }),
       );
-      if (samePath(activeTab()?.path, from)) {
-        editor?.setDocumentPath(to);
-        rememberRecent(to);
+      if (activeNext) {
+        editor?.setDocumentPath(activeNext);
+        rememberRecent(activeNext);
         void syncTitle();
       }
       await reloadTree();
@@ -966,16 +983,21 @@ export default function App() {
   }
 
   async function removeEntry(path: string) {
-    const tab = tabs().find((item) => samePath(item.path, path));
-    if (tab?.dirty) {
-      // Deleting the file under an unsaved buffer would lose the edits.
+    // A folder that still backs an open tab is refused: deleting it would leave
+    // the tab writing to a path that no longer exists.
+    const open = tabs().find((item) => item.path && isInside(item.path, path));
+    if (open?.dirty) {
       setNotice(t(locale(), "externalConflict"));
+      return;
+    }
+    if (open && !samePath(open.path, path)) {
+      setNotice(t(locale(), "closeBeforeDelete"));
       return;
     }
     if (!window.confirm(`${t(locale(), "remove")} ${documentName(path, "")}?`)) return;
     try {
       await deleteEntry(path);
-      if (tab) await closeTab(tab.id);
+      if (open) await closeTab(open.id);
       await reloadTree();
       refreshWatches();
     } catch (error) {
