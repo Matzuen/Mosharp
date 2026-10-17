@@ -236,20 +236,11 @@ class TableWidget extends WidgetType {
     }
     table.appendChild(tbody);
 
-    // Highlight the column the next operation would act on, and mirror that
-    // column's alignment on the toolbar.
-    const columns: HTMLElement[][] = [];
-    for (const row of table.querySelectorAll("tr")) {
-      Array.from(row.children).forEach((cell, index) => {
-        (columns[index] ??= []).push(cell as HTMLElement);
-      });
-    }
+    // Mirror the active column's alignment on the toolbar.
     const alignButtons: HTMLButtonElement[] = [];
     const syncActive = () => {
-      columns.forEach((cells, index) => {
-        const on = index === this.activeCol;
-        for (const cell of cells) cell.classList.toggle("cm-md-cell-active", on);
-      });
+      // The column is no longer tinted: the toolbar only appears once a cell is
+      // focused, and that focused cell already tells you which column it is.
       const current = aligns[this.activeCol] ?? "left";
       alignButtons.forEach((button, index) => {
         const on = ALIGN_ORDER[index] === current;
@@ -1528,7 +1519,10 @@ export const livePreviewTheme = EditorView.baseTheme({
   },
   ".cm-md-table-left": { left: "0" },
   ".cm-md-table-chrome": { right: "8px" },
-  ".cm-md-table-wrap:hover .cm-md-table-left, .cm-md-table-wrap:focus-within .cm-md-table-left, .cm-md-table-wrap.cm-md-table-open .cm-md-table-left, .cm-md-table-wrap:hover .cm-md-table-chrome, .cm-md-table-wrap:focus-within .cm-md-table-chrome, .cm-md-table-wrap.cm-md-table-open .cm-md-table-chrome":
+  // Revealed only while a cell has focus (or the menu is open) — hovering must
+  // not pop them up, because that made an idle table look busy and left it
+  // unclear which column the alignment buttons would apply to.
+  ".cm-md-table-wrap:focus-within .cm-md-table-left, .cm-md-table-wrap.cm-md-table-open .cm-md-table-left, .cm-md-table-wrap:focus-within .cm-md-table-chrome, .cm-md-table-wrap.cm-md-table-open .cm-md-table-chrome":
     {
       opacity: "1",
       pointerEvents: "auto",
@@ -1558,9 +1552,6 @@ export const livePreviewTheme = EditorView.baseTheme({
       outline: "2px solid var(--accent)",
       outlineOffset: "1px",
     },
-  ".cm-md-table-widget th.cm-md-cell-active, .cm-md-table-widget td.cm-md-cell-active": {
-    background: "color-mix(in srgb, var(--accent) 10%, transparent)",
-  },
   ".cm-md-table-align:hover, .cm-md-table-action:hover, .cm-md-table-more:hover": {
     color: "var(--ink)",
     background: "var(--hover)",
