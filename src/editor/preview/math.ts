@@ -331,6 +331,32 @@ export function decorateMath(
             build.covered.push({ from: blockFrom, to: blockTo });
             build.labels?.set(line.from, `${n}–${close}`);
           }
+        } else if (overlaps) {
+          // Being edited: keep the source on screen and render the result
+          // underneath it, so the TeX is editable without losing the preview.
+          const tex = doc.sliceString(doc.line(n + 1).from, closing.from).replace(/\n$/, "");
+          if (tex.trim() && tex.length <= MAX_TEX) {
+            const bodyFrom = doc.line(n + 1).from;
+            // Monospace tint groups the fence and the body into one source card.
+            for (let j = n; j <= close; j += 1) {
+              let classes = build.lineClasses.get(j);
+              if (!classes) {
+                classes = new Set();
+                build.lineClasses.set(j, classes);
+              }
+              classes.add("cm-md-math-source");
+            }
+            // A block widget must sit on a line boundary; at the end of the
+            // document the closing fence's own end is the only one available.
+            const at = close < doc.lines ? doc.line(close + 1).from : closing.to;
+            build.decos.push(
+              Decoration.widget({
+                widget: new MathWidget(tex, true, bodyFrom, closing.from),
+                block: true,
+                side: 1,
+              }).range(at),
+            );
+          }
         }
         n = close + 1;
         continue;

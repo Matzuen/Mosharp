@@ -1407,6 +1407,13 @@ export const livePreviewTheme = EditorView.baseTheme({
   },
   ".cm-md-lang-item:hover": { background: "var(--hover)" },
   ".cm-md-math": { color: "var(--math)", cursor: "text" },
+  // Source of the `$$` block being edited: a monospace card that visually pairs
+  // with the rendered preview shown right below it.
+  ".cm-md-math-source": {
+    backgroundColor: "var(--math-bg)",
+    fontFamily: 'Consolas, "Courier New", monospace',
+    fontSize: "0.92em",
+  },
   ".cm-md-math .katex": { color: "inherit" },
   ".cm-md-math-block": {
     display: "block",

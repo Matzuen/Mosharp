@@ -45,14 +45,21 @@ assert(
 );
 
 // The caret anywhere in the opening fence or the body must reveal the source,
-// otherwise the TeX cannot be edited.
-assert(probe(endsWithFence, 1).decos.length === 0, "caret on the opening fence shows source");
-assert(probe(endsWithFence, 4).decos.length === 0, "caret in the body shows source");
+// otherwise the TeX cannot be edited. A rendered preview is still appended
+// below it, so "no replacement decoration" is what "source is visible" means.
+const renders = (build: { decos: Array<{ from: number; to: number }> }) =>
+  build.decos.some((deco) => deco.to > deco.from);
+const previewOnly = (build: { decos: Array<{ from: number; to: number }> }) =>
+  build.decos.length > 0 && !renders(build);
+
+assert(!renders(probe(endsWithFence, 1)), "caret on the opening fence shows source");
+assert(!renders(probe(endsWithFence, 4)), "caret in the body shows source");
+assert(previewOnly(probe(endsWithFence, 4)), "editing renders a preview below the source");
 
 // Trailing content keeps working as before.
 const withTail = `${endsWithFence}\n\ntail`;
-assert(probe(withTail, withTail.length).decos.length > 0, "caret after the block renders it");
-assert(probe(withTail, 4).decos.length === 0, "caret in the body still shows source");
+assert(renders(probe(withTail, withTail.length)), "caret after the block renders it");
+assert(!renders(probe(withTail, 4)), "caret in the body still shows source");
 
 // Single-line and inline math are unaffected, including at the document end
 // where the caret rests on the closing delimiter.
