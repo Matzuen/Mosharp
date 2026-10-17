@@ -108,6 +108,79 @@ pub fn is_markdown_name(name: &str) -> bool {
     lower.ends_with(".md") || lower.ends_with(".markdown") || lower.ends_with(".txt")
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn temp_root(tag: &str) -> PathBuf {
+        let mut path = std::env::temp_dir();
+        path.push(format!(
+            "mosharp-workspace-{tag}-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|value| value.as_nanos())
+                .unwrap_or_default()
+        ));
+        fs::create_dir_all(&path).expect("temp root");
+        path
+    }
+
+    #[test]
+    fn creates_a_document_and_refuses_duplicates() {
+        let root = temp_root("create");
+        let target = root.join("nested/note.md");
+        create_document(target.to_string_lossy().into_owned()).expect("create");
+        assert!(target.exists(), "the file exists");
+        assert_eq!(fs::read_to_string(&target).expect("read"), "");
+        assert!(create_document(target.to_string_lossy().into_owned()).is_err(), "duplicate refused");
+        fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn renames_and_refuses_to_overwrite() {
+        let root = temp_root("rename");
+        let from = root.join("a.md");
+        let to = root.join("b.md");
+        fs::write(&from, "x").expect("write");
+        rename_entry(
+            from.to_string_lossy().into_owned(),
+            to.to_string_lossy().into_owned(),
+        )
+        .expect("rename");
+        assert!(to.exists() && !from.exists(), "moved");
+
+        fs::write(&from, "y").expect("write");
+        assert!(
+            rename_entry(
+                from.to_string_lossy().into_owned(),
+                to.to_string_lossy().into_owned()
+            )
+            .is_err(),
+            "an existing target is refused"
+        );
+        fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn deletes_files_but_never_a_non_empty_folder() {
+        let root = temp_root("delete");
+        let file = root.join("a.md");
+        fs::write(&file, "x").expect("write");
+        delete_entry(file.to_string_lossy().into_owned()).expect("delete file");
+        assert!(!file.exists());
+
+        let folder = root.join("dir");
+        fs::create_dir_all(&folder).expect("dir");
+        fs::write(folder.join("keep.md"), "x").expect("write");
+        assert!(
+            delete_entry(folder.to_string_lossy().into_owned()).is_err(),
+            "a folder with contents is refused"
+        );
+        fs::remove_dir_all(&root).ok();
+    }
+}
+
 #[cfg(windows)]
 fn reveal_path(path: &Path) -> Result<(), String> {
     let absolute = fs::canonicalize(path).map_err(|err| err.to_string())?;

@@ -40,6 +40,7 @@ import {
 } from "./api/files";
 import logoUrl from "./assets/logo-mark.png";
 import { generateBenchmark } from "./editor/benchmark";
+import { replaceAllText } from "./editor/replaceText";
 import { createEditor, INITIAL_DOCUMENT, type EditorController } from "./editor/createEditor";
 import {
   detectLineEnding,
@@ -271,6 +272,10 @@ export default function App() {
   const [searchBusy, setSearchBusy] = createSignal(false);
   /** Index of the content match the up/down buttons are sitting on. */
   const [matchIndex, setMatchIndex] = createSignal(-1);
+  const [replaceText, setReplaceText] = createSignal("");
+  const [replacing, setReplacing] = createSignal(false);
+  /** Bumped after a workspace replace so the results refresh. */
+  const [searchTick, setSearchTick] = createSignal(0);
   const [recent, setRecent] = createSignal<RecentEntry[]>(loadRecent());
 
   const locale = createMemo(() => prefs().locale);
@@ -2181,6 +2186,7 @@ export default function App() {
   createEffect(() => {
     const query = fileQuery().trim();
     const root = prefs().workspaceRoot;
+    searchTick();
     if (searchTimer) clearTimeout(searchTimer);
     if (!query || !root || !isTauri()) {
       searchSeq += 1;
@@ -2222,8 +2228,47 @@ export default function App() {
     void openSearchHit(list[next].path, list[next].line);
   }
 
-  /** Split a preview line so the matched term can be highlighted. */
-  function highlightParts(text: string, query: string) {
+  /**
+   * Replace the search term across every file that currently has a content
+   * match. Files open in a tab are skipped: rewriting a buffer that the user is
+   * editing would either lose their changes or fight with the watcher.
+   */
+  async function replaceInWorkspace() {
+    const query = fileQuery().trim();
+    if (!query || !isTauri() || replacing()) return;
+    const files = [...new Set(searchHits().matches.map((hit) => hit.path))];
+    if (files.length === 0) return;
+    if (!window.confirm(`${t(locale(), "replaceAll")} — ${files.length}`)) return;
+    setReplacing(true);
+    let edited = 0;
+    let hits = 0;
+    let skipped = 0;
+    for (const path of files) {
+      if (tabs().some((tab) => samePath(tab.path, path))) {
+        skipped += 1;
+        continue;
+      }
+      try {
+        const opened = await readDocument(path);
+        const result = replaceAllText(opened.content, query, replaceText());
+        if (result.count === 0) continue;
+        // Keep the watcher quiet: we already know we changed the file.
+        await suppressFileWatch(path);
+        await writeDocument(path, result.text, normalizeEncoding(opened.encoding));
+        await touchFileWatchBaseline(path);
+        edited += 1;
+        hits += result.count;
+      } catch {
+        skipped += 1;
+      }
+    }
+    setReplacing(false);
+    const detail = skipped > 0 ? ` · ${t(locale(), "replaceSkipped")} ${skipped}` : "";
+    setNotice(`${t(locale(), "replaceDone")} ${hits} / ${edited}${detail}`);
+    setSearchTick((value) => value + 1);
+  }
+
+  /** Split a preview line so the matched term can be highlighted. */  function highlightParts(text: string, query: string) {
     const needle = query.trim().toLowerCase();
     if (!needle) return [{ text, hit: false }];
     const parts: Array<{ text: string; hit: boolean }> = [];
@@ -2497,6 +2542,28 @@ export default function App() {
                           </button>
                         </span>
                       </p>
+                      <div class="side-replace">
+                        <input
+                          class="side-search"
+                          type="search"
+                          placeholder={t(locale(), "replaceWith")}
+                          value={replaceText()}
+                          onInput={(event) => setReplaceText(event.currentTarget.value)}
+                          onKeyDown={(event) => {
+                            if (event.key !== "Enter") return;
+                            event.preventDefault();
+                            void replaceInWorkspace();
+                          }}
+                        />
+                        <button
+                          type="button"
+                          class="side-replace-go"
+                          disabled={replacing()}
+                          onClick={() => void replaceInWorkspace()}
+                        >
+                          {t(locale(), "replaceAll")}
+                        </button>
+                      </div>
                       <For each={searchHits().matches}>
                         {(hit, index) => (
                           <button

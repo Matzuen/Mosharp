@@ -893,6 +893,42 @@ textarea {
   padding: 8px 8px 0;
 }
 
+.side-replace {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px 6px;
+}
+
+.side-replace .side-search {
+  flex: 1;
+  min-width: 0;
+  width: auto;
+  margin: 0;
+  height: 26px;
+}
+
+.side-replace-go {
+  flex: none;
+  height: 26px;
+  padding: 0 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--menu);
+  color: var(--ink);
+  cursor: pointer;
+  font-size: 11px;
+}
+
+.side-replace-go:hover:not(:disabled) {
+  background: var(--hover);
+}
+
+.side-replace-go:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
 .side-search-row .side-search {
   flex: 1;
   min-width: 0;
