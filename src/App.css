@@ -640,6 +640,11 @@ textarea {
   background: color-mix(in srgb, var(--accent) 28%, transparent);
 }
 
+.side-resizer:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
 .editor-host {
   flex: 1;
   min-width: 0;

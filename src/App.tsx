@@ -1098,6 +1098,45 @@ export default function App() {
     window.addEventListener("pointerup", onUp);
   }
 
+  /** Keyboard equivalent of dragging the sidebar edge. */
+  function resizeByKey(event: KeyboardEvent) {
+    const step = event.shiftKey ? 48 : 16;
+    let next: number | null = null;
+    if (event.key === "ArrowLeft") next = prefs().panelWidth - step;
+    else if (event.key === "ArrowRight") next = prefs().panelWidth + step;
+    else if (event.key === "Home") next = MIN_PANEL;
+    else if (event.key === "End") next = MAX_PANEL;
+    if (next === null) return;
+    event.preventDefault();
+    patchPrefs({ panelWidth: clampPanelWidth(next) });
+  }
+
+  /** Arrow keys move between tree rows instead of tabbing through all of them. */
+  function treeKeyDown(event: KeyboardEvent) {
+    const items = Array.from(
+      (event.currentTarget as HTMLElement).querySelectorAll<HTMLElement>('[role="treeitem"]'),
+    );
+    if (items.length === 0) return;
+    const index = items.indexOf(document.activeElement as HTMLElement);
+    if (index < 0) return;
+    const focusAt = (target: number) => {
+      items[Math.max(0, Math.min(items.length - 1, target))]?.focus();
+    };
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
+      focusAt(index + 1);
+    } else if (event.key === "ArrowUp") {
+      event.preventDefault();
+      focusAt(index - 1);
+    } else if (event.key === "Home") {
+      event.preventDefault();
+      focusAt(0);
+    } else if (event.key === "End") {
+      event.preventDefault();
+      focusAt(items.length - 1);
+    }
+  }
+
   async function copyPath(path: string | null | undefined) {
     if (!path) {
       setNotice(t(locale(), "noPath"));
@@ -2169,7 +2208,7 @@ export default function App() {
                 onInput={(event) => setFileQuery(event.currentTarget.value)}
               />
             </Show>
-            <div class="side-body">
+            <div class="side-body" role="tree" aria-label={t(locale(), "files")} onKeyDown={treeKeyDown}>
               <Show
                 when={prefs().panelMode === "files"}
                 fallback={
@@ -2207,6 +2246,7 @@ export default function App() {
                       {(hit) => (
                         <button
                           type="button"
+                          role="treeitem"
                           class={`tree-item${samePath(hit.path, activeTab()?.path) ? " current" : ""}`}
                           title={hit.path}
                           onClick={() => void openPathInTab(hit.path)}
@@ -2224,6 +2264,7 @@ export default function App() {
                         {(hit) => (
                           <button
                             type="button"
+                            role="treeitem"
                             class="match-row"
                             title={`${hit.path}:${hit.line}`}
                             onClick={() => void openSearchHit(hit.path, hit.line)}
@@ -2251,6 +2292,8 @@ export default function App() {
                       {(node) => (
                         <button
                           type="button"
+                          role="treeitem"
+                          aria-expanded={node.is_dir ? node.expanded : undefined}
                           class={`tree-item${node.is_dir ? " dir" : ""}${
                             samePath(node.path, activeTab()?.path) ? " current" : ""
                           }`}
@@ -2284,7 +2327,15 @@ export default function App() {
             </div>
             <div
               class="side-resizer"
+              role="separator"
+              aria-orientation="vertical"
+              aria-valuemin={MIN_PANEL}
+              aria-valuemax={MAX_PANEL}
+              aria-valuenow={prefs().panelWidth}
+              aria-label="Sidebar width"
+              tabindex="0"
               onPointerDown={(event) => startResize(event)}
+              onKeyDown={resizeByKey}
               title={`${MIN_PANEL}–${MAX_PANEL}px`}
             />
           </aside>
