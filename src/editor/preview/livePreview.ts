@@ -21,6 +21,7 @@ import { notify } from "./notify";
 import { insideStrictly } from "./cursorScope";
 import { frontMatterLines } from "./frontMatter";
 import { MAX_ENTRIES, TocScan, type TocEntry } from "./toc";
+import { sanitizeHtml } from "../../export/sanitize";
 import { focusModeField, sourceModeField } from "./modes";
 import { quoteDepth } from "./quoteDepth";
 import {
@@ -160,8 +161,46 @@ class CollapseWidget extends WidgetType {
 
 const collapseWidget = new CollapseWidget();
 
-/** Folded YAML header: one chip instead of the whole block. */
-class FrontMatterWidget extends WidgetType {
+/**
+ * ```html fence rendered for real, through the allow-list sanitizer.
+ *
+ * A click outside a link puts the caret back in the fence so the source can be
+ * edited; the block is otherwise inert.
+ */
+class HtmlBlockWidget extends WidgetType {
+  constructor(
+    readonly source: string,
+    readonly caretAt: number,
+  ) {
+    super();
+  }
+
+  eq(other: HtmlBlockWidget) {
+    return other.source === this.source && other.caretAt === this.caretAt;
+  }
+
+  toDOM(view: EditorView) {
+    const wrap = document.createElement("div");
+    wrap.className = "cm-md-html-block";
+    wrap.innerHTML = sanitizeHtml(this.source);
+    wrap.addEventListener("mousedown", (event) => {
+      if (!(event instanceof MouseEvent) || event.button !== 0) return;
+      if ((event.target as HTMLElement | null)?.closest("a")) return;
+      event.preventDefault();
+      event.stopPropagation();
+      const at = Math.min(this.caretAt, view.state.doc.length);
+      view.dispatch({ selection: { anchor: at } });
+      view.focus();
+    });
+    return wrap;
+  }
+
+  ignoreEvent() {
+    return true;
+  }
+}
+
+/** Folded YAML header: one chip instead of the whole block. */class FrontMatterWidget extends WidgetType {
   constructor(
     readonly rows: number,
     readonly from: number,
@@ -884,6 +923,32 @@ function decorateRange(
           build.covered.push({ from: start.from, to: end.to });
           spanLabel(build, view.state.doc, start.number, end.number);
           return false;
+        }
+        // ```html renders for real. The source is allow-list sanitized first:
+          // the preview runs inside the app window, which holds Tauri IPC access.
+        if (name === "FencedCode" && !cursorIn && /^(?:html|htm)$/i.test((info ?? "").trim())) {
+          const bodyFrom = start.number < end.number ? view.state.doc.line(start.number + 1).from : start.to;
+          const bodyTo = end.number > start.number ? view.state.doc.line(end.number).from : end.to;
+          const source = view.state.doc.sliceString(bodyFrom, Math.max(bodyFrom, bodyTo)).replace(/\n$/, "");
+          if (source.trim().length <= 20_000) {
+            const deco = Decoration.replace({ widget: new HtmlBlockWidget(source, start.from + 1) }).range(
+              start.from,
+              start.to,
+            );
+            build.decos.push(deco);
+            build.atomic.push(deco);
+            for (let n = start.number + 1; n <= end.number; n += 1) {
+              const line = view.state.doc.line(n);
+              const sink = Decoration.replace({ widget: collapseWidget }).range(line.from, line.to);
+              build.decos.push(sink);
+              build.atomic.push(sink);
+              addLineClass(build, n, "cm-md-sink");
+              build.hidden.push(line.from);
+            }
+            build.covered.push({ from: start.from, to: end.to });
+            spanLabel(build, view.state.doc, start.number, end.number);
+            return false;
+          }
         }
         for (let n = start.number; n <= end.number; n += 1) {
           const line = view.state.doc.line(n);
@@ -1621,6 +1686,11 @@ export const livePreviewTheme = EditorView.baseTheme({
     fontSize: "0.92em",
     color: "var(--muted)",
     backgroundColor: "var(--code-block)",
+  },
+  // Rendered ```html block: plain document content, no frame of its own.
+  ".cm-md-html-block": {
+    display: "block",
+    margin: "0.2em 0",
   },
   // `[TOC]`
   ".cm-md-toc": {
