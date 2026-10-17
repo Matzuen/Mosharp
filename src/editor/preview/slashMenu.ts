@@ -201,6 +201,9 @@ export const slashMenuTheme = EditorView.baseTheme({
     minWidth: "160px",
     maxHeight: "min(60vh, 420px)",
     overflowY: "auto",
+    // Still scrolls with the wheel and the arrow keys; the track itself would
+    // just cut into a compact popup, so it is hidden.
+    scrollbarWidth: "none",
     padding: "4px",
     borderRadius: "8px",
     border: "1px solid var(--line)",
@@ -208,6 +211,8 @@ export const slashMenuTheme = EditorView.baseTheme({
     color: "var(--ink)",
     boxShadow: "0 8px 20px rgba(28,25,23,0.12)",
   },
+  ".cm-slash-menu::-webkit-scrollbar": { display: "none" },
+  ".cm-slash-menu::-webkit-scrollbar-thumb": { display: "none" },
   ".cm-slash-item": {
     display: "block",
     width: "100%",
