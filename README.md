@@ -1,4 +1,4 @@
-# Mosharp 1.2.0
+# Mosharp 1.2.1
 
 面向 10 万行仍可编辑的 Markdown 编辑器。
 
@@ -31,7 +31,7 @@ Tauri 2 + SolidJS + CodeMirror 6。Windows 桌面应用（WebView2）。
 - 富文本复制，粘贴到邮件或聊天工具时保留格式
 - 标题锚点跳转，中文标题可用（按住 `Ctrl` 再点）
 - 选中文字后直接粘贴一个网址 → 自动包成 `[文字](网址)`
-- 行首空行敲 `$$` 立刻生成公式块；敲 `` ``` `` 后输入语言再回车补出闭合围栏；空围栏里按退格整块删除
+- 行首空行敲 `$$` 立刻生成公式块；敲 `` ``` `` 后输入语言再回车补出闭合围栏；围栏正文正好一行空行时，按退格整块删除（多余空行先逐行删）
 - 输入围栏语言时弹出可选语言列表（`↑` `↓` 选择、`Enter` 采用）
 
 **视口内的重块**
@@ -112,8 +112,8 @@ npm run tauri build
 | 路径 | 说明 |
 | :--- | :--- |
 | `src-tauri/target/release/mosharp.exe` | 免安装可执行文件 |
-| `src-tauri/target/release/bundle/nsis/Mosharp_1.2.0_x64-setup.exe` | NSIS 安装包（推荐，文件关联由它注册） |
-| `src-tauri/target/release/bundle/msi/Mosharp_1.2.0_x64_en-US.msi` | MSI 安装包（需联网让 Tauri 下载 WiX） |
+| `src-tauri/target/release/bundle/nsis/Mosharp_1.2.1_x64-setup.exe` | NSIS 安装包（推荐，文件关联由它注册） |
+| `src-tauri/target/release/bundle/msi/Mosharp_1.2.1_x64_en-US.msi` | MSI 安装包（需联网让 Tauri 下载 WiX） |
 
 只要 NSIS、不想等 MSI：
 
