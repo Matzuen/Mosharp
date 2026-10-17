@@ -1001,8 +1001,7 @@ function decorateRange(
         const info = start.text.replace(/^ {0,3}`{3,}/, "").trim().split(/\s+/)[0] ?? "";
         const cursorIn = rangeHasCursor(view, node.from, node.to);
         const kind = diagramKind(info);
-        if (name === "FencedCode" && kind && !cursorIn) {
-          const bodyFrom = start.number < end.number ? view.state.doc.line(start.number + 1).from : start.to;
+        if (name === "FencedCode" && kind && !cursorIn) {          const bodyFrom = start.number < end.number ? view.state.doc.line(start.number + 1).from : start.to;
           const bodyTo = end.number > start.number ? view.state.doc.line(end.number).from : end.to;
           const source = view.state.doc.sliceString(bodyFrom, Math.max(bodyFrom, bodyTo)).replace(/\n$/, "");
           const deco = Decoration.replace({ widget: new DiagramWidget(kind, source) }).range(start.from, start.to);
@@ -1019,6 +1018,22 @@ function decorateRange(
           build.covered.push({ from: start.from, to: end.to });
           spanLabel(build, view.state.doc, start.number, end.number);
           return false;
+        }
+        // Editing a diagram fence keeps the source and shows the rendered result
+        // underneath, the same way an edited `$$` block does.
+        if (name === "FencedCode" && kind && cursorIn) {
+          const bodyFrom = start.number < end.number ? view.state.doc.line(start.number + 1).from : start.to;
+          const bodyTo = end.number > start.number ? view.state.doc.line(end.number).from : end.to;
+          const source = view.state.doc.sliceString(bodyFrom, Math.max(bodyFrom, bodyTo)).replace(/\n$/, "");
+          if (source.trim().length > 0) {
+            // Inline widget: block widgets may not come from a view plugin.
+            build.decos.push(
+              Decoration.widget({
+                widget: new DiagramWidget(kind, source, true),
+                side: 1,
+              }).range(end.to),
+            );
+          }
         }
         // ```html stays a code block: the author asked for its source. Only tags
         // written directly in the document are rendered (see the HTMLBlock arm).
@@ -1798,6 +1813,14 @@ export const livePreviewTheme = EditorView.baseTheme({
   ".cm-md-html-block": {
     display: "block",
     margin: "0.2em 0",
+  },
+  // Rendered diagram shown under a fence that is being edited.
+  ".cm-md-diagram-preview": {
+    display: "block",
+    marginTop: "0.35em",
+    padding: "6px 8px",
+    borderRadius: "8px",
+    background: "var(--math-bg)",
   },
   // Fence recovered from inside an HTML block (missing blank line): plain code
   // styling, since the normal highlighted path cannot be reused there.

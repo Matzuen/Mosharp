@@ -108,12 +108,16 @@ export class DiagramWidget extends WidgetType {
   constructor(
     readonly kind: DiagramKind,
     readonly source: string,
+    /** Rendered under the source while the fence is being edited. */
+    readonly preview = false,
   ) {
     super();
   }
 
   eq(other: DiagramWidget) {
-    return this.kind === other.kind && this.source === other.source;
+    return (
+      this.kind === other.kind && this.source === other.source && this.preview === other.preview
+    );
   }
 
   get estimatedHeight() {
@@ -122,7 +126,7 @@ export class DiagramWidget extends WidgetType {
 
   toDOM(view: EditorView) {
     const el = document.createElement("div");
-    el.className = "cm-md-mermaid";
+    el.className = this.preview ? "cm-md-mermaid cm-md-diagram-preview" : "cm-md-mermaid";
     el.title = "点击编辑源码";
     const token = {};
     (el as DiagramHost)._token = token;
