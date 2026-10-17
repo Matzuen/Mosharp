@@ -35,6 +35,8 @@ class MathWidget extends WidgetType {
     readonly display: boolean,
     readonly from: number,
     readonly to: number,
+    /** Rendered below the source while the block is being edited. */
+    readonly preview = false,
   ) {
     super();
   }
@@ -44,7 +46,8 @@ class MathWidget extends WidgetType {
       this.tex === other.tex &&
       this.display === other.display &&
       this.from === other.from &&
-      this.to === other.to
+      this.to === other.to &&
+      this.preview === other.preview
     );
   }
 
@@ -54,7 +57,8 @@ class MathWidget extends WidgetType {
 
   toDOM(view: EditorView) {
     const el = document.createElement(this.display ? "div" : "span");
-    el.className = this.display ? "cm-md-math cm-md-math-block" : "cm-md-math";
+    const base = this.display ? "cm-md-math cm-md-math-block" : "cm-md-math";
+    el.className = this.preview ? `${base} cm-md-math-preview` : base;
     el.textContent = this.tex;
     // Clicking the rendered formula puts the caret inside the source. The
     // decoration is then dropped by `rangeHasCursor`, so the TeX shows up and
@@ -346,15 +350,16 @@ export function decorateMath(
               }
               classes.add("cm-md-math-source");
             }
-            // A block widget must sit on a line boundary; at the end of the
-            // document the closing fence's own end is the only one available.
-            const at = close < doc.lines ? doc.line(close + 1).from : closing.to;
+            // Inline widget at the end of the closing fence, whose element is
+            // display:block so it reads as a line underneath. A *block* widget
+            // would be the natural choice, but CodeMirror only allows those
+            // from a StateField — creating one here throws and the decorations
+            // never update, which left the formula stuck in its rendered state.
             build.decos.push(
               Decoration.widget({
-                widget: new MathWidget(tex, true, bodyFrom, closing.from),
-                block: true,
+                widget: new MathWidget(tex, true, bodyFrom, closing.from, true),
                 side: 1,
-              }).range(at),
+              }).range(closing.to),
             );
           }
         }

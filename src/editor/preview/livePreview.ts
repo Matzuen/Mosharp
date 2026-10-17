@@ -1414,6 +1414,12 @@ export const livePreviewTheme = EditorView.baseTheme({
     fontFamily: 'Consolas, "Courier New", monospace',
     fontSize: "0.92em",
   },
+  // The live preview of a `$$` block being edited rides at the end of the
+  // closing fence; display:block makes it occupy its own row there.
+  ".cm-md-math-preview": {
+    display: "block",
+    marginTop: "0.35em",
+  },
   ".cm-md-math .katex": { color: "inherit" },
   ".cm-md-math-block": {
     display: "block",

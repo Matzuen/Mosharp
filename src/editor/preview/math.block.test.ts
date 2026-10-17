@@ -56,6 +56,17 @@ assert(!renders(probe(endsWithFence, 1)), "caret on the opening fence shows sour
 assert(!renders(probe(endsWithFence, 4)), "caret in the body shows source");
 assert(previewOnly(probe(endsWithFence, 4)), "editing renders a preview below the source");
 
+// The preview must be an inline widget on the closing fence's end: block
+// widgets are not allowed from a view plugin, and trying left the formula
+// stuck in its rendered state.
+const editing = probe(endsWithFence, 4);
+const points = editing.decos.filter((deco) => deco.from === deco.to);
+assert(points.length === 1, `editing adds exactly one widget (got ${points.length})`);
+assert(
+  points[0].from === endsWithFence.length,
+  `the preview sits at the end of the closing fence (got ${points[0].from})`,
+);
+
 // Trailing content keeps working as before.
 const withTail = `${endsWithFence}\n\ntail`;
 assert(renders(probe(withTail, withTail.length)), "caret after the block renders it");
