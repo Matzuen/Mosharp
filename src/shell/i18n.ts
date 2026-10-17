@@ -128,6 +128,7 @@ const messages = {
     autoSave: "自动保存（停止输入后写入磁盘）",
     contentMatches: "内容匹配",
     noMatches: "没有匹配项",
+    searchTruncated: "结果过多，只显示前面一部分",
   },
   en: {
     brand: "Mosharp",
@@ -255,6 +256,7 @@ const messages = {
     autoSave: "Auto-save (write to disk after typing stops)",
     contentMatches: "In content",
     noMatches: "No matches",
+    searchTruncated: "Too many results — showing the first ones",
   },
   "zh-TW": zhTW,
   ja,

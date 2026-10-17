@@ -129,6 +129,7 @@ export const zhTW = {
   autoSave: "自動儲存（停止輸入後寫入磁碟）",
   contentMatches: "內容符合",
   noMatches: "沒有符合的項目",
+  searchTruncated: "結果太多，只顯示前面一部分",
 };
 
 export const ja = {
@@ -256,6 +257,7 @@ export const ja = {
   autoSave: "自動保存（入力が止まるとディスクに書き込む）",
   contentMatches: "本文中の一致",
   noMatches: "一致する項目がありません",
+  searchTruncated: "結果が多すぎます。先頭のみ表示しています",
 };
 
 export const de = {
@@ -383,6 +385,7 @@ export const de = {
   autoSave: "Automatisch speichern (nach Tipppause)",
   contentMatches: "Im Text",
   noMatches: "Keine Treffer",
+  searchTruncated: "Zu viele Treffer — nur die ersten werden gezeigt",
 };
 
 export const fr = {
@@ -510,6 +513,7 @@ export const fr = {
   autoSave: "Enregistrement automatique (après une pause de frappe)",
   contentMatches: "Dans le contenu",
   noMatches: "Aucun résultat",
+  searchTruncated: "Trop de résultats — seuls les premiers sont affichés",
 };
 
 export const es = {
@@ -637,4 +641,5 @@ export const es = {
   autoSave: "Guardado automático (tras una pausa al escribir)",
   contentMatches: "En el contenido",
   noMatches: "Sin resultados",
+  searchTruncated: "Demasiados resultados: solo se muestran los primeros",
 };

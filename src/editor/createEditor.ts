@@ -107,7 +107,6 @@ const hello = "world"
 export interface EditorStats {
   lines: number;
   chars: number;
-  words: number;
 }
 
 export interface EditorController {
@@ -115,6 +114,11 @@ export interface EditorController {
   focus: () => void;
   text: () => string;
   stats: () => EditorStats;
+  /**
+   * Prose word count. Kept separate from `stats()` because it scans the whole
+   * document — call it on a debounce, not on every keystroke.
+   */
+  wordCount: () => number;
   getState: () => EditorState;
   setState: (state: EditorState) => void;
   createState: (text: string) => EditorState;
@@ -392,8 +396,8 @@ export function createEditor(
     stats: () => ({
       lines: view.state.doc.lines,
       chars: view.state.doc.length,
-      words: countProseWords(view.state.doc.toString()),
     }),
+    wordCount: () => countProseWords(view.state.doc.toString()),
     getState: () => view.state,
     setState: (state) => {
       applying = true;

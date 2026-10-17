@@ -110,11 +110,15 @@ import "./App.css";
 const BENCHMARK_LINES = 100_000;
 /** Quiet period after the last keystroke before auto-save writes to disk. */
 const AUTO_SAVE_DELAY_MS = 1200;
+/** Word counting scans the whole document, so it waits for a typing pause. */
+const WORD_COUNT_DELAY_MS = 250;
 
 interface TabRecord {
   id: string;
   path: string | null;
   dirty: boolean;
+  /** The file changed on disk while this tab had unsaved edits. */
+  conflicted?: boolean;
   state: EditorState | null;
   scrollTop: number;
   lineEnding: LineEnding;
@@ -209,6 +213,7 @@ export default function App() {
   let sessionTimer: ReturnType<typeof setTimeout> | null = null;
   let scrollUiTimer: ReturnType<typeof setTimeout> | null = null;
   let searchTimer: ReturnType<typeof setTimeout> | null = null;
+  let wordCountTimer: ReturnType<typeof setTimeout> | null = null;
   /** Guards against an older search landing after a newer one. */
   let searchSeq = 0;
   let activeId = "";
@@ -301,6 +306,19 @@ export default function App() {
     ) {
       editor.remeasure();
     }
+  }
+
+  let searchInput: HTMLInputElement | undefined;
+
+  /** Sidebar search is reachable without the mouse. */
+  function focusFileSearch() {
+    if (!prefs().panelOpen || prefs().panelMode !== "files") {
+      patchPrefs({ panelOpen: true, panelMode: "files" });
+    }
+    requestAnimationFrame(() => {
+      searchInput?.focus();
+      searchInput?.select();
+    });
   }
 
   function patchPrefs(partial: Partial<Preferences>) {
@@ -456,12 +474,25 @@ export default function App() {
     if (isTauri()) await getCurrentWindow().setTitle(title);
   }
 
+  /**
+   * Line and character counts are cheap and update immediately; the word count
+   * scans the whole document (~10 ms on a 1.6 MB file), so it waits for a pause
+   * in typing instead of running on every keystroke.
+   */
   function refreshStats() {
     if (!editor) return;
     const stats = editor.stats();
     setLines(stats.lines);
     setChars(stats.chars);
-    setWords(stats.words);
+    scheduleWordCount();
+  }
+
+  function scheduleWordCount() {
+    if (wordCountTimer) clearTimeout(wordCountTimer);
+    wordCountTimer = setTimeout(() => {
+      wordCountTimer = null;
+      if (editor) setWords(editor.wordCount());
+    }, WORD_COUNT_DELAY_MS);
   }
 
   function refreshOutline() {
@@ -518,6 +549,10 @@ export default function App() {
     if (!prefs().autoSave) return;
     const tab = activeTab();
     if (!tab?.path || !activeId) return;
+    // A tab whose file changed on disk must not be written automatically: the
+    // user was just told there is a conflict, and silently overwriting the
+    // external edit would lose it.
+    if (tab.conflicted) return;
     const id = activeId;
     const path = tab.path;
     if (autoSaveTimer) clearTimeout(autoSaveTimer);
@@ -525,7 +560,7 @@ export default function App() {
       autoSaveTimer = null;
       // The tab may have been switched, renamed or closed while waiting.
       const current = tabs().find((item) => item.id === id);
-      if (!current?.dirty || current.path !== path || activeId !== id) return;
+      if (!current?.dirty || current.conflicted || current.path !== path || activeId !== id) return;
       void persist(path, true);
     }, AUTO_SAVE_DELAY_MS);
   }
@@ -971,7 +1006,7 @@ export default function App() {
       setTabs((current) =>
         current.map((tab) =>
           tab.id === activeId
-            ? { ...tab, path: target, dirty: stillClean ? false : tab.dirty }
+            ? { ...tab, path: target, dirty: stillClean ? false : tab.dirty, conflicted: false }
             : tab,
         ),
       );
@@ -1560,6 +1595,11 @@ export default function App() {
       return;
     }
     if (tab.dirty) {
+      // Remember the conflict so auto-save refuses to overwrite the external
+      // edit until the user saves explicitly.
+      setTabs((current) =>
+        current.map((item) => (item.id === tab.id ? { ...item, conflicted: true } : item)),
+      );
       setNotice(t(locale(), "externalConflict"));
       return;
     }
@@ -1572,6 +1612,9 @@ export default function App() {
       const livePath = liveTab.path;
       if (!livePath) return;
       if (liveTab.dirty) {
+        setTabs((current) =>
+          current.map((item) => (item.id === liveTab.id ? { ...item, conflicted: true } : item)),
+        );
         setNotice(t(locale(), "externalConflict"));
         return;
       }
@@ -1765,6 +1808,11 @@ export default function App() {
           return;
         }
       }
+      if ((event.ctrlKey || event.metaKey) && event.shiftKey && event.key.toLowerCase() === "f") {
+        event.preventDefault();
+        focusFileSearch();
+        return;
+      }
       if (event.key === "Escape") {
         // One layer per press, innermost first, and give focus back to the
         // editor so typing works again immediately.
@@ -1940,6 +1988,7 @@ export default function App() {
       if (dirtyFadeTimer) clearTimeout(dirtyFadeTimer);
       if (autoSaveTimer) clearTimeout(autoSaveTimer);
       if (searchTimer) clearTimeout(searchTimer);
+      if (wordCountTimer) clearTimeout(wordCountTimer);
       if (treePollTimer) clearInterval(treePollTimer);
       if (sessionTimer) clearTimeout(sessionTimer);
       if (scrollUiTimer) clearTimeout(scrollUiTimer);
@@ -2203,9 +2252,16 @@ export default function App() {
               <input
                 class="side-search"
                 type="search"
+                ref={searchInput}
                 placeholder={t(locale(), "searchFiles")}
                 value={fileQuery()}
                 onInput={(event) => setFileQuery(event.currentTarget.value)}
+                onKeyDown={(event) => {
+                  if (event.key !== "Escape") return;
+                  event.preventDefault();
+                  if (fileQuery()) setFileQuery("");
+                  else event.currentTarget.blur();
+                }}
               />
             </Show>
             <div class="side-body" role="tree" aria-label={t(locale(), "files")} onKeyDown={treeKeyDown}>
@@ -2276,6 +2332,9 @@ export default function App() {
                           </button>
                         )}
                       </For>
+                    </Show>
+                    <Show when={searchHits().truncated}>
+                      <p class="side-empty">{t(locale(), "searchTruncated")}</p>
                     </Show>
                     <Show
                       when={
