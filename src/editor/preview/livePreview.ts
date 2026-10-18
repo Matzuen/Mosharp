@@ -35,6 +35,12 @@ import {
   TABLE_MENU_KEYS,
   type TableOp,
 } from "./tableOps";
+import {
+  clearRange,
+  isSingleCell,
+  normalizeRange,
+  rangeToTsv,
+} from "./tableRange";
 import { viewportZoom } from "./zoom";
 
 /** Shared attributes for the small inline toolbar icons. */
@@ -564,6 +570,110 @@ class TableWidget extends WidgetType {  dom: HTMLElement | null = null;
     }
     table.appendChild(tbody);
 
+    /*
+     * Rectangular cell selection.
+     *
+     * A plain click must still place the caret for editing, so the drag only
+     * takes over once the pointer reaches a *different* cell; at that point the
+     * browser's own text selection is dropped and the rectangle is painted.
+     */
+    let selAnchor: { row: number; col: number } | null = null;
+    let selFocus: { row: number; col: number } | null = null;
+    let selDragging = false;
+    const cellPos = (target: EventTarget | null) => {
+      const cell = (target as HTMLElement | null)?.closest?.(".cm-md-cell") as HTMLElement | null;
+      if (!cell || !table.contains(cell)) return null;
+      const row = Number(cell.dataset.row);
+      const col = Number(cell.dataset.col);
+      if (!Number.isFinite(row) || !Number.isFinite(col)) return null;
+      return { row, col };
+    };
+    const paintSelection = () => {
+      const range = selAnchor && selFocus ? normalizeRange(selAnchor, selFocus) : null;
+      table.querySelectorAll<HTMLElement>(".cm-md-cell").forEach((cell) => {
+        const row = Number(cell.dataset.row);
+        const col = Number(cell.dataset.col);
+        const on =
+          !!range &&
+          row >= range.rowFrom &&
+          row <= range.rowTo &&
+          col >= range.colFrom &&
+          col <= range.colTo;
+        cell.classList.toggle("cm-md-cell-selected", on && !isSingleCell(range!));
+      });
+    };
+    const clearSelection = () => {
+      selAnchor = null;
+      selFocus = null;
+      selDragging = false;
+      paintSelection();
+    };
+    const currentRange = () =>
+      selAnchor && selFocus ? normalizeRange(selAnchor, selFocus) : null;
+
+    const onMove = (event: MouseEvent) => {
+      if (!selAnchor) return;
+      const pos = cellPos(document.elementFromPoint(event.clientX, event.clientY));
+      if (!pos) return;
+      if (pos.row === selAnchor.row && pos.col === selAnchor.col) return;
+      if (!selDragging) {
+        selDragging = true;
+        // Drop the text selection the drag started.
+        window.getSelection()?.removeAllRanges();
+      }
+      event.preventDefault();
+      selFocus = pos;
+      paintSelection();
+    };
+    const onUp = () => {
+      window.removeEventListener("mousemove", onMove, true);
+      window.removeEventListener("mouseup", onUp, true);
+      // A plain click is not a range: let the cell keep the caret.
+      if (!selDragging) clearSelection();
+    };
+    table.addEventListener("mousedown", (event) => {
+      if (event.button !== 0) return;
+      if (event.ctrlKey || event.metaKey) return;
+      const pos = cellPos(event.target);
+      if (!pos) return;
+      selAnchor = pos;
+      selFocus = pos;
+      selDragging = false;
+      paintSelection();
+      window.addEventListener("mousemove", onMove, true);
+      window.addEventListener("mouseup", onUp, true);
+    });
+
+    wrap.addEventListener("keydown", (event) => {
+      const range = currentRange();
+      if (!range || isSingleCell(range)) return;
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "c") {
+        event.preventDefault();
+        event.stopPropagation();
+        void navigator.clipboard.writeText(rangeToTsv(this.source, range)).catch(() => {});
+        return;
+      }
+      if (event.key === "Delete" || event.key === "Backspace") {
+        event.preventDefault();
+        event.stopPropagation();
+        const next = clearRange(this.source, range);
+        if (next !== this.source) {
+          view.dispatch({
+            changes: { from: this.from, to: this.from + this.source.length, insert: next },
+          });
+        }
+        clearSelection();
+        view.focus();
+        return;
+      }
+      if (event.key === "Escape") {
+        event.preventDefault();
+        event.stopPropagation();
+        clearSelection();
+        view.focus();
+      }
+    });
+
     // Mirror the active column's alignment on the toolbar.
     const alignButtons: HTMLButtonElement[] = [];
     const syncActive = () => {
@@ -778,6 +888,8 @@ function renderRow(
     // Mutable: it tracks the last committed value so "dirty" stays meaningful.
     let original = cells[i];
     cell.className = "cm-md-cell";
+    cell.dataset.row = String(visualRow);
+    cell.dataset.col = String(i);
     // A cell cannot hold a real newline, so a line break is stored as `<br>`.
     const lines = original.split(/<br\s*\/?>/i);
     cell.textContent = lines[0] ?? "";
@@ -1830,6 +1942,10 @@ export const livePreviewTheme = EditorView.baseTheme({
   },
   ".cm-md-table-resizing": {
     userSelect: "none",
+  },
+  // Rectangular cell selection (drag across cells).
+  ".cm-md-cell-selected": {
+    backgroundColor: "var(--accent-soft, rgba(90, 140, 255, 0.18))",
   },
   ".cm-md-table-widget th, .cm-md-table-widget td": {
     border: "1px solid var(--table-border)",
