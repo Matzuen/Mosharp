@@ -50,6 +50,8 @@ export const DEFAULT_SHORTCUTS: ShortcutMap = {
   task: "Ctrl+Enter",
 };
 
+export type SessionOnOpenFile = "fresh" | "resume";
+
 export interface Preferences {
   panelOpen: boolean;
   panelWidth: number;
@@ -76,6 +78,8 @@ export interface Preferences {
   zoom: number;
   /** Write changes to disk automatically a moment after typing stops. */
   autoSave: boolean;
+  /** What a file passed on the command line does to the previous session. */
+  sessionOnOpenFile: SessionOnOpenFile;
 }
 
 const KEY = "mosharp.preferences.v1";
@@ -108,6 +112,7 @@ export const defaultPreferences: Preferences = {
   shortcuts: { ...DEFAULT_SHORTCUTS },
   zoom: 1,
   autoSave: false,
+  sessionOnOpenFile: "fresh",
 };
 
 export const MIN_ZOOM = 0.6;
@@ -187,6 +192,9 @@ export function loadPreferences(): Preferences {
       shortcuts: loadShortcuts(parsed.shortcuts),
       zoom: clampZoom(parsed.zoom ?? defaultPreferences.zoom),
       autoSave: pickBool(parsed.autoSave, defaultPreferences.autoSave),
+      // Unknown values fall back to "fresh": opening a file must never
+      // depend on a setting that a newer version removed.
+      sessionOnOpenFile: parsed.sessionOnOpenFile === "resume" ? "resume" : "fresh",
     };
   } catch {
     return { ...defaultPreferences, shortcuts: { ...DEFAULT_SHORTCUTS } };

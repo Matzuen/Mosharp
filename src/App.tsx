@@ -1982,7 +1982,10 @@ export default function App() {
           startup = [];
         }
       }
-      const restored = startup.length === 0 ? await restoreSession() : false;
+      // "resume" restores the previous tabs and adds the clicked file;
+      // "fresh" opens only the requested document.
+      const restore = startup.length === 0 || prefs().sessionOnOpenFile === "resume";
+      const restored = restore ? await restoreSession() : false;
       if (!restored) {
         const firstId = newTabId();
         activeId = firstId;

@@ -133,6 +133,22 @@ export function SettingsDialog(props: {
                 checked={props.prefs.autoSave}
                 onChange={(autoSave) => props.onChange({ autoSave })}
               />
+              <label class="settings-row">
+                <span>{label("sessionOnOpenFile")}</span>
+                <select
+                  value={props.prefs.sessionOnOpenFile}
+                  onChange={(event) =>
+                    props.onChange({
+                      sessionOnOpenFile:
+                        event.currentTarget.value === "resume" ? "resume" : "fresh",
+                    })
+                  }
+                >
+                  <option value="fresh">{label("sessionFresh")}</option>
+                  <option value="resume">{label("sessionResume")}</option>
+                </select>
+              </label>
+              <p class="settings-note">{label("sessionOnOpenFileNote")}</p>
             </Show>
             <Show when={section() === "markdown"}>
               <Check
