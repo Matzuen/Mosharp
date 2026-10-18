@@ -85,6 +85,14 @@ import { SettingsDialog } from "./shell/SettingsDialog";
 import { chordFromEvent } from "./shell/shortcuts";
 import { ancestorPaths, isInside } from "./shell/treePaths";
 import {
+  appendRun,
+  lastUndoableRun,
+  markUndone,
+  parseRuns,
+  type ReplaceEntry,
+  type ReplaceRun,
+} from "./shell/replaceLog";
+import {
   clampPanelWidth,
   clampZoom,
   CONTENT_WIDTHS,
@@ -1521,6 +1529,11 @@ export default function App() {
             label: label("reveal"),
             run: () => void reveal(activeTab()?.path),
           },
+          {
+            id: "undo-replace",
+            label: label("undoReplace"),
+            run: () => void undoReplace(),
+          },
         ],
       },
       {
@@ -2377,6 +2390,7 @@ export default function App() {
     let edited = 0;
     let hits = 0;
     let skipped = 0;
+    const entries: ReplaceEntry[] = [];
     for (const path of files) {
       if (tabs().some((tab) => samePath(tab.path, path))) {
         skipped += 1;
@@ -2388,7 +2402,12 @@ export default function App() {
         if (result.count === 0) continue;
         // This operation has no undo, so a copy goes to the recovery folder
         // first. If the backup cannot be written, the file is left untouched.
-        await saveRecoveryCopy(`替换前-${documentName(path, "doc")}`, opened.content);
+        const backup = await saveRecoveryCopy(`替换前-${documentName(path, "doc")}`, opened.content);
+        entries.push({
+          original: path,
+          backup,
+          encoding: normalizeEncoding(opened.encoding),
+        });
         // Keep the watcher quiet: we already know we changed the file.
         await suppressFileWatch(path);
         await writeDocument(path, result.text, normalizeEncoding(opened.encoding));
@@ -2400,9 +2419,116 @@ export default function App() {
       }
     }
     setReplacing(false);
+    if (entries.length > 0) {
+      const run: ReplaceRun = {
+        at: Date.now(),
+        query,
+        replacement: replaceText(),
+        entries,
+      };
+      const runs = appendRun(loadReplaceRuns(), run);
+      saveReplaceRuns(runs);
+    }
     const detail = skipped > 0 ? ` · ${t(locale(), "replaceSkipped")} ${skipped}` : "";
     setNotice(`${t(locale(), "replaceDone")} ${hits} / ${edited}${detail}`);
     setSearchTick((value) => value + 1);
+  }
+
+  const REPLACE_LOG_KEY = "mosharp.replaceLog";
+
+  function loadReplaceRuns(): ReplaceRun[] {
+    try {
+      return parseRuns(localStorage.getItem(REPLACE_LOG_KEY));
+    } catch {
+      return [];
+    }
+  }
+
+  function saveReplaceRuns(runs: ReplaceRun[]) {
+    try {
+      localStorage.setItem(REPLACE_LOG_KEY, JSON.stringify(runs));
+    } catch {
+      // A full quota only costs the undo history.
+    }
+  }
+
+  /** Re-read one tab from disk after its file was restored. */
+  async function reloadTabFromDisk(id: string) {
+    const tab = tabs().find((item) => item.id === id);
+    if (!tab?.path || !editor) return;
+    const opened = await readDocument(tab.path);
+    const lineEnding = detectLineEnding(opened.content);
+    if (tab.id === activeId) {
+      const scrollTop = editor.getScrollTop();
+      editor.replace(opened.content);
+      editor.setScrollTop(scrollTop);
+      setTabs((current) =>
+        current.map((item) =>
+          item.id === id
+            ? { ...item, dirty: false, conflicted: false, state: editor!.getState(), scrollTop, lineEnding }
+            : item,
+        ),
+      );
+      setDirty(false);
+      setDirtyBadge(false);
+      refreshStats();
+      refreshOutline();
+    } else {
+      const state = editor.createState(opened.content);
+      setTabs((current) =>
+        current.map((item) =>
+          item.id === id ? { ...item, dirty: false, conflicted: false, state, lineEnding } : item,
+        ),
+      );
+    }
+    await touchFileWatchBaseline(tab.path);
+  }
+
+  /**
+   * Restore every file from the most recent replacement's recovery copies.
+   * Only the newest run that has not been undone yet is reversed; older ones
+   * stay available for another press.
+   */
+  async function undoReplace() {
+    if (!isTauri()) return;
+    const runs = loadReplaceRuns();
+    const run = lastUndoableRun(runs);
+    if (!run) {
+      setNotice(t(locale(), "replaceNothing"));
+      return;
+    }
+    const question = `${t(locale(), "undoReplace")} — ${run.entries.length}\n\n${run.query}`;
+    let confirmed = false;
+    try {
+      confirmed = await ask(question, { title: "Mosharp", kind: "warning" });
+    } catch {
+      confirmed = window.confirm(question);
+    }
+    if (!confirmed) return;
+
+    let restored = 0;
+    let failed = 0;
+    for (const entry of run.entries) {
+      try {
+        const copy = await readDocument(entry.backup);
+        await suppressFileWatch(entry.original);
+        await writeDocument(entry.original, copy.content, normalizeEncoding(entry.encoding));
+        await touchFileWatchBaseline(entry.original);
+        restored += 1;
+      } catch {
+        failed += 1;
+      }
+    }
+    saveReplaceRuns(markUndone(runs, run.at, Date.now()));
+    // Open buffers keep their old text; reload the ones restored on disk.
+    for (const tab of tabs()) {
+      if (tab.path && run.entries.some((entry) => samePath(entry.original, tab.path))) {
+        await reloadTabFromDisk(tab.id);
+      }
+    }
+    setSearchTick((value) => value + 1);
+    const detail = failed > 0 ? ` · ${t(locale(), "replaceSkipped")} ${failed}` : "";
+    setNotice(`${t(locale(), "replaceUndone")} ${restored}${detail}`);
   }
 
   /** Split a preview line so the matched term can be highlighted. */  function highlightParts(text: string, query: string) {
