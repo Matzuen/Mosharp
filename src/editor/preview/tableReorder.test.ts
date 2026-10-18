@@ -1,4 +1,4 @@
-import { moveColumn, moveRow, slotAt } from "./tableReorder.ts";
+import { bodyRowOf, moveColumn, moveRow, slotAt } from "./tableReorder.ts";
 
 function assert(condition: boolean, message: string): void {
   if (!condition) throw new Error(message);
@@ -43,5 +43,14 @@ assert(slotAt(slots, 5) === 0, "inside the first slot");
 assert(slotAt(slots, 30) === 1, "inside the second slot");
 assert(slotAt(slots, -5) === 0, "before the first slot clamps to first");
 assert(slotAt(slots, 99) === 1, "past the last slot clamps to last");
+
+// The drag hit test measures body rows only; the header is visual row 0.
+assert(bodyRowOf(0) === 1, "the first body slot is visual row 1");
+assert(bodyRowOf(1) === 2, "the second body slot is visual row 2");
+const viaSlots = moveRow(table, bodyRowOf(0), bodyRowOf(1));
+assert(
+  viaSlots === moveRow(table, 1, 2),
+  "dropping slot 0 on slot 1 swaps the first two body rows",
+);
 
 console.log("tableReorder ok");

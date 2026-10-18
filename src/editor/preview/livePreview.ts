@@ -41,7 +41,7 @@ import {
   normalizeRange,
   rangeToTsv,
 } from "./tableRange";
-import { moveColumn, moveRow, slotAt } from "./tableReorder";
+import { bodyRowOf, moveColumn, moveRow, slotAt } from "./tableReorder";
 import { viewportZoom } from "./zoom";
 
 /** Shared attributes for the small inline toolbar icons. */
@@ -591,7 +591,10 @@ class TableWidget extends WidgetType {  dom: HTMLElement | null = null;
       handle.setPointerCapture(event.pointerId);
       wrap.classList.add("cm-md-table-moving");
       const zoom = viewportZoom() || 1;
-      let target = index;
+      // Slot index inside the measured list: body rows are 0-based, columns are
+      // 0-based. The visual row of a body row is slot + 1, but keeping the slot
+      // here means the drop line and the hit test cannot drift apart.
+      let slot = index;
 
       const rects = () => {
         const nodes =
@@ -603,7 +606,7 @@ class TableWidget extends WidgetType {  dom: HTMLElement | null = null;
       };
       const paint = () => {
         const boxes = rects();
-        const box = boxes[target];
+        const box = boxes[slot];
         if (!box) {
           indicator.style.display = "none";
           return;
@@ -611,7 +614,6 @@ class TableWidget extends WidgetType {  dom: HTMLElement | null = null;
         const wrapBox = wrap.getBoundingClientRect();
         indicator.style.display = "block";
         if (kind === "row") {
-          // Second body row of the table is visual row 1.
           indicator.style.top = `${(box.start - wrapBox.top) / zoom}px`;
           indicator.style.left = "0";
           indicator.style.width = "100%";
@@ -627,8 +629,7 @@ class TableWidget extends WidgetType {  dom: HTMLElement | null = null;
         const position = kind === "row" ? moveEvent.clientY : moveEvent.clientX;
         const found = slotAt(rects(), position);
         if (found < 0) return;
-        // Row slots are body rows only, so slot 0 is visual row 1.
-        target = kind === "row" ? found + 1 : found;
+        slot = found;
         paint();
       };
       const done = () => {
@@ -637,10 +638,12 @@ class TableWidget extends WidgetType {  dom: HTMLElement | null = null;
         handle.removeEventListener("pointercancel", done);
         wrap.classList.remove("cm-md-table-moving");
         indicator.style.display = "none";
-        if (target === index) return;
-        const from = kind === "row" ? index + 1 : index;
+        if (slot === index) return;
+        // Body rows are visual row 1 in the source; columns are 0-based in both.
         const next =
-          kind === "row" ? moveRow(this.source, from, target) : moveColumn(this.source, from, target);
+          kind === "row"
+            ? moveRow(this.source, bodyRowOf(index), bodyRowOf(slot))
+            : moveColumn(this.source, index, slot);
         if (next === this.source) return;
         view.dispatch({
           changes: { from: this.from, to: this.from + this.source.length, insert: next },
@@ -745,7 +748,11 @@ class TableWidget extends WidgetType {  dom: HTMLElement | null = null;
       window.addEventListener("mouseup", onUp, true);
     });
 
-    wrap.addEventListener("keydown", (event) => {
+    // Capture phase: the cell's own keydown handler stops propagation on every
+    // key, so a bubble-phase listener here would never see Ctrl+C / Delete.
+    wrap.addEventListener(
+      "keydown",
+      (event) => {
       const range = currentRange();
       if (!range || isSingleCell(range)) return;
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "c") {
@@ -773,7 +780,9 @@ class TableWidget extends WidgetType {  dom: HTMLElement | null = null;
         clearSelection();
         view.focus();
       }
-    });
+      },
+      true,
+    );
 
     // Mirror the active column's alignment on the toolbar.
     const alignButtons: HTMLButtonElement[] = [];

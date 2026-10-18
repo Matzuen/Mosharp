@@ -88,6 +88,16 @@ export interface Slot {
 }
 
 /**
+ * Visual row of a body-row slot.
+ *
+ * The drag hit test measures only body rows, so slot 0 is visual row 1 (the
+ * header owns row 0). Kept as a function so the offset is stated once and tested.
+ */
+export function bodyRowOf(slot: number): number {
+  return slot + 1;
+}
+
+/**
  * Index of the slot the pointer is over, or the nearest one when it sits past
  * the last slot. Used for both row (Y) and column (X) dragging.
  */
