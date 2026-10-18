@@ -256,6 +256,26 @@ function homePastMarkers(view: EditorView): boolean {
   return true;
 }
 
+/**
+ * Clicking the very left of a line that starts with a hidden marker puts the
+ * caret in front of that marker (`# 标题` → before `#`), where typing silently
+ * changes the line's structure. Mouse selections that land there are moved to
+ * the first visible character; keyboard access to the marker itself (Home, or
+ * arrow keys) is left alone.
+ */
+function snapPointerSelection(view: EditorView): void {
+  const range = view.state.selection.main;
+  if (!range.empty) return;
+  const line = view.state.doc.lineAt(range.head);
+  if (range.head !== line.from) return;
+  const start = advanceOverMarkers(hiddenMarkersAt(view, line.from), line.from);
+  if (start === line.from) return;
+  view.dispatch({
+    selection: { anchor: start },
+    userEvent: "select.pointer",
+  });
+}
+
 function buildExtensions(
   hooks: {
     onEdit: () => void;
@@ -306,6 +326,14 @@ function buildExtensions(
         { key: "Home", run: homePastMarkers },
       ]),
     ),
+    EditorView.updateListener.of((update) => {
+      if (!update.selectionSet) return;
+      // Only pointer selections: snapping keyboard movement would make the
+      // marker impossible to reach.
+      const byPointer = update.transactions.some((tr) => tr.isUserEvent("select.pointer"));
+      if (!byPointer) return;
+      snapPointerSelection(update.view);
+    }),
     keyCompartment.of(keymap.of(formatKeymapFrom(DEFAULT_SHORTCUTS))),
     keymap.of([
       indentWithTab,
