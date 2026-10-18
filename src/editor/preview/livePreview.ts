@@ -41,6 +41,7 @@ import {
   normalizeRange,
   rangeToTsv,
 } from "./tableRange";
+import { moveColumn, moveRow, slotAt } from "./tableReorder";
 import { viewportZoom } from "./zoom";
 
 /** Shared attributes for the small inline toolbar icons. */
@@ -569,6 +570,106 @@ class TableWidget extends WidgetType {  dom: HTMLElement | null = null;
       visualRow += 1;
     }
     table.appendChild(tbody);
+
+    /*
+     * Row / column reordering.
+     *
+     * Grips appear on hover; while dragging, a line shows where the item will
+     * land. The document is only rewritten on drop, so an abandoned drag leaves
+     * no undo entry.
+     */
+    const indicator = document.createElement("div");
+    indicator.className = "cm-md-drop-indicator";
+    indicator.style.display = "none";
+    wrap.appendChild(indicator);
+
+    const startMove = (event: PointerEvent, kind: "row" | "col", index: number) => {
+      if (event.button !== 0) return;
+      event.preventDefault();
+      event.stopPropagation();
+      const handle = event.currentTarget as HTMLElement;
+      handle.setPointerCapture(event.pointerId);
+      wrap.classList.add("cm-md-table-moving");
+      const zoom = viewportZoom() || 1;
+      let target = index;
+
+      const rects = () => {
+        const nodes =
+          kind === "row" ? Array.from(tbody.querySelectorAll("tr")) : Array.from(thead.querySelectorAll("th"));
+        return nodes.map((node) => {
+          const box = node.getBoundingClientRect();
+          return kind === "row" ? { start: box.top, end: box.bottom } : { start: box.left, end: box.right };
+        });
+      };
+      const paint = () => {
+        const boxes = rects();
+        const box = boxes[target];
+        if (!box) {
+          indicator.style.display = "none";
+          return;
+        }
+        const wrapBox = wrap.getBoundingClientRect();
+        indicator.style.display = "block";
+        if (kind === "row") {
+          // Second body row of the table is visual row 1.
+          indicator.style.top = `${(box.start - wrapBox.top) / zoom}px`;
+          indicator.style.left = "0";
+          indicator.style.width = "100%";
+          indicator.style.height = "2px";
+        } else {
+          indicator.style.left = `${(box.start - wrapBox.left) / zoom}px`;
+          indicator.style.top = "0";
+          indicator.style.width = "2px";
+          indicator.style.height = "100%";
+        }
+      };
+      const move = (moveEvent: PointerEvent) => {
+        const position = kind === "row" ? moveEvent.clientY : moveEvent.clientX;
+        const found = slotAt(rects(), position);
+        if (found < 0) return;
+        // Row slots are body rows only, so slot 0 is visual row 1.
+        target = kind === "row" ? found + 1 : found;
+        paint();
+      };
+      const done = () => {
+        handle.removeEventListener("pointermove", move);
+        handle.removeEventListener("pointerup", done);
+        handle.removeEventListener("pointercancel", done);
+        wrap.classList.remove("cm-md-table-moving");
+        indicator.style.display = "none";
+        if (target === index) return;
+        const from = kind === "row" ? index + 1 : index;
+        const next =
+          kind === "row" ? moveRow(this.source, from, target) : moveColumn(this.source, from, target);
+        if (next === this.source) return;
+        view.dispatch({
+          changes: { from: this.from, to: this.from + this.source.length, insert: next },
+        });
+      };
+      move(event);
+      handle.addEventListener("pointermove", move);
+      handle.addEventListener("pointerup", done);
+      handle.addEventListener("pointercancel", done);
+    };
+
+    Array.from(thead.querySelectorAll("th")).forEach((cell, index) => {
+      const grip = document.createElement("span");
+      grip.className = "cm-md-col-move-grip";
+      grip.setAttribute("aria-hidden", "true");
+      grip.title = "拖动调整列顺序";
+      grip.addEventListener("pointerdown", (event) => startMove(event, "col", index));
+      cell.appendChild(grip);
+    });
+    Array.from(tbody.querySelectorAll("tr")).forEach((row, index) => {
+      const first = row.querySelector<HTMLElement>(".cm-md-cell");
+      if (!first) return;
+      const grip = document.createElement("span");
+      grip.className = "cm-md-row-grip";
+      grip.setAttribute("aria-hidden", "true");
+      grip.title = "拖动调整行顺序";
+      grip.addEventListener("pointerdown", (event) => startMove(event, "row", index));
+      first.appendChild(grip);
+    });
 
     /*
      * Rectangular cell selection.
@@ -1946,6 +2047,57 @@ export const livePreviewTheme = EditorView.baseTheme({
   // Rectangular cell selection (drag across cells).
   ".cm-md-cell-selected": {
     backgroundColor: "var(--accent-soft, rgba(90, 140, 255, 0.18))",
+  },
+  // Drag handles for reordering, shown only while hovering the table.
+  ".cm-md-row-grip": {
+    position: "absolute",
+    left: "-9px",
+    top: "0",
+    width: "8px",
+    height: "100%",
+    cursor: "grab",
+    opacity: "0",
+    touchAction: "none",
+  },
+  ".cm-md-col-move-grip": {
+    position: "absolute",
+    left: "0",
+    top: "-7px",
+    width: "100%",
+    height: "6px",
+    cursor: "grab",
+    opacity: "0",
+    touchAction: "none",
+  },
+  ".cm-md-table-widget:hover .cm-md-row-grip, .cm-md-table-widget:hover .cm-md-col-move-grip": {
+    opacity: "1",
+  },
+  ".cm-md-row-grip::after, .cm-md-col-move-grip::after": {
+    content: '""',
+    position: "absolute",
+    background: "var(--line)",
+  },
+  ".cm-md-row-grip::after": {
+    left: "3px",
+    top: "20%",
+    width: "2px",
+    height: "60%",
+  },
+  ".cm-md-col-move-grip::after": {
+    left: "20%",
+    top: "2px",
+    width: "60%",
+    height: "2px",
+  },
+  ".cm-md-drop-indicator": {
+    position: "absolute",
+    background: "var(--accent)",
+    pointerEvents: "none",
+    zIndex: "3",
+  },
+  ".cm-md-table-moving": {
+    userSelect: "none",
+    cursor: "grabbing",
   },
   ".cm-md-table-widget th, .cm-md-table-widget td": {
     border: "1px solid var(--table-border)",
