@@ -2971,7 +2971,36 @@ export default function App() {
             />
           </aside>
         </Show>
-        <div class="editor-host" ref={host} />
+        <div class="editor-column">
+          <Show when={activeTab()?.conflicted}>
+            <div class="conflict-bar" role="alert">
+              <span class="conflict-text">{t(locale(), "conflictBanner")}</span>
+              <button
+                type="button"
+                onClick={() => {
+                  const id = activeTab()?.id;
+                  if (id) void reloadTabFromDisk(id);
+                }}
+              >
+                {t(locale(), "reloadFromDisk")}
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setTabs((current) =>
+                    current.map((item) =>
+                      item.id === activeTabId() ? { ...item, conflicted: false } : item,
+                    ),
+                  );
+                  void save();
+                }}
+              >
+                {t(locale(), "keepMine")}
+              </button>
+            </div>
+          </Show>
+          <div class="editor-host" ref={host} />
+        </div>
       </div>
 
       <footer class="status">

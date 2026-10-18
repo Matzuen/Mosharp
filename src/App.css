@@ -1326,3 +1326,44 @@ textarea {
   color: var(--ink);
   cursor: pointer;
 }
+
+/* Editor column wrapper so a banner can sit above the editor. */
+.editor-column {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* An external change needs a decision, so this stays until the user acts. */
+.conflict-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--line);
+  background: var(--menu);
+  color: var(--ink);
+  font-size: 12px;
+}
+
+.conflict-text {
+  flex: 1;
+  min-width: 0;
+}
+
+.conflict-bar button {
+  flex: none;
+  height: 24px;
+  padding: 0 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--paper);
+  color: var(--ink);
+  cursor: pointer;
+  font-size: 11px;
+}
+
+.conflict-bar button:hover {
+  background: var(--hover);
+}
