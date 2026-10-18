@@ -1367,3 +1367,28 @@ textarea {
 .conflict-bar button:hover {
   background: var(--hover);
 }
+
+/* Search options: case sensitivity and regular expressions. */
+.side-toggle {
+  flex: none;
+  height: 28px;
+  min-width: 26px;
+  padding: 0 5px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--menu);
+  color: var(--faint);
+  cursor: pointer;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.side-toggle:hover {
+  color: var(--ink);
+  background: var(--hover);
+}
+
+.side-toggle.active {
+  color: var(--accent);
+  border-color: var(--accent);
+}

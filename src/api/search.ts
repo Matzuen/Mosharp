@@ -29,6 +29,14 @@ export function searchWorkspace(
   root: string,
   query: string,
   limit = 200,
+  caseSensitive = false,
+  useRegex = false,
 ): Promise<WorkspaceSearch> {
-  return invoke<WorkspaceSearch>("search_workspace", { root, query, limit });
+  return invoke<WorkspaceSearch>("search_workspace", {
+    root,
+    query,
+    limit,
+    caseSensitive,
+    useRegex,
+  });
 }

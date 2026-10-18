@@ -61,7 +61,50 @@ fn preview(line: &str) -> String {
     out
 }
 
-fn scan_file(path: &Path, needle: &str, budget: usize) -> Vec<TextMatch> {
+/// How a line is matched: a plain needle or a regular expression.
+enum Matcher {
+    Text { needle: String, case_sensitive: bool },
+    Pattern(regex::Regex),
+}
+
+impl Matcher {
+    fn is_match(&self, line: &str) -> bool {
+        match self {
+            Matcher::Text { needle, case_sensitive } => {
+                if *case_sensitive {
+                    line.contains(needle.as_str())
+                } else {
+                    line.to_lowercase().contains(needle.as_str())
+                }
+            }
+            Matcher::Pattern(pattern) => pattern.is_match(line),
+        }
+    }
+}
+
+/// Build the matcher for one search. A bad pattern is reported, not ignored.
+fn build_matcher(query: &str, case_sensitive: bool, regex: bool) -> Result<Matcher, String> {
+    if regex {
+        let pattern = if case_sensitive {
+            query.to_string()
+        } else {
+            format!("(?i:{query})")
+        };
+        return regex::Regex::new(&pattern)
+            .map(Matcher::Pattern)
+            .map_err(|err| format!("正则表达式无效：{err}"));
+    }
+    Ok(Matcher::Text {
+        needle: if case_sensitive {
+            query.to_string()
+        } else {
+            query.to_lowercase()
+        },
+        case_sensitive,
+    })
+}
+
+fn scan_file(path: &Path, matcher: &Matcher, budget: usize) -> Vec<TextMatch> {
     let mut out = Vec::new();
     let meta = match fs::metadata(path) {
         Ok(meta) => meta,
@@ -80,7 +123,7 @@ fn scan_file(path: &Path, needle: &str, budget: usize) -> Vec<TextMatch> {
     }
     let text = String::from_utf8_lossy(&bytes);
     for (index, line) in text.lines().enumerate() {
-        if line.to_lowercase().contains(needle) {
+        if matcher.is_match(line) {
             out.push(TextMatch {
                 path: path.to_string_lossy().into_owned(),
                 line: index + 1,
@@ -105,10 +148,14 @@ pub async fn search_workspace(
     root: String,
     query: String,
     limit: Option<usize>,
+    case_sensitive: Option<bool>,
+    use_regex: Option<bool>,
 ) -> Result<WorkspaceSearch, String> {
     // Reading thousands of files must not run on the main thread, or the window
     // stutters while the search is in flight.
-    tauri::async_runtime::spawn_blocking(move || search_workspace_blocking(root, query, limit))
+    tauri::async_runtime::spawn_blocking(move || {
+        search_workspace_blocking(root, query, limit, case_sensitive, use_regex)
+    })
         .await
         .map_err(|err| err.to_string())?
 }
@@ -117,20 +164,23 @@ fn search_workspace_blocking(
     root: String,
     query: String,
     limit: Option<usize>,
+    case_sensitive: Option<bool>,
+    use_regex: Option<bool>,
 ) -> Result<WorkspaceSearch, String> {
     let base = PathBuf::from(&root);
     let meta = fs::metadata(&base).map_err(|err| err.to_string())?;
     if !meta.is_dir() {
         return Err("路径不是文件夹".to_string());
     }
-    let needle = query.trim().to_lowercase();
-    if needle.is_empty() {
+    let query = query.trim().to_string();
+    if query.is_empty() {
         return Ok(WorkspaceSearch {
             names: Vec::new(),
             matches: Vec::new(),
             truncated: false,
         });
     }
+    let matcher = build_matcher(&query, case_sensitive.unwrap_or(false), use_regex.unwrap_or(false))?;
     let max_hits = limit.unwrap_or(200).clamp(1, 2000);
 
     let mut names = Vec::new();
@@ -172,7 +222,7 @@ fn search_workspace_blocking(
             if !is_markdown_name(&name) {
                 continue;
             }
-            if names.len() < max_hits && name.to_lowercase().contains(&needle) {
+            if names.len() < max_hits && matcher.is_match(&name) {
                 names.push(WalkEntry {
                     path: path.to_string_lossy().into_owned(),
                     name,
@@ -180,7 +230,7 @@ fn search_workspace_blocking(
                 });
             }
             if matches.len() < max_hits {
-                matches.extend(scan_file(&path, &needle, max_hits - matches.len()));
+                matches.extend(scan_file(&path, &matcher, max_hits - matches.len()));
             }
         }
     }
@@ -225,7 +275,7 @@ mod tests {
         write(&root.join("deep/nested/note.md"), "# note\n");
         write(&root.join("node_modules/skip.md"), "# skip\n");
 
-        let found = search_workspace_blocking(root.to_string_lossy().into_owned(), "note".into(), None)
+        let found = search_workspace_blocking(root.to_string_lossy().into_owned(), "note".into(), None, None, None)
             .expect("search");
         assert_eq!(found.names.len(), 1, "nested match found");
         assert!(found.names[0].path.ends_with("note.md"));
@@ -238,7 +288,7 @@ mod tests {
         write(&root.join("a.md"), "第一行\nNeedle 在这一行\n");
         write(&root.join("node_modules/b.md"), "Needle\n");
 
-        let found = search_workspace_blocking(root.to_string_lossy().into_owned(), "needle".into(), None)
+        let found = search_workspace_blocking(root.to_string_lossy().into_owned(), "needle".into(), None, None, None)
             .expect("search");
         assert_eq!(found.matches.len(), 1, "only the real document matches");
         assert_eq!(found.matches[0].line, 2);
@@ -250,9 +300,62 @@ mod tests {
     fn empty_query_returns_nothing() {
         let root = temp_root("empty");
         write(&root.join("a.md"), "x");
-        let found = search_workspace_blocking(root.to_string_lossy().into_owned(), "   ".into(), None)
+        let found = search_workspace_blocking(root.to_string_lossy().into_owned(), "   ".into(), None, None, None)
             .expect("search");
         assert!(found.names.is_empty() && found.matches.is_empty());
+        fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn case_sensitive_search_skips_other_casings() {
+        let root = temp_root("case");
+        write(&root.join("a.md"), "Needle\nneedle\n");
+
+        let loose = search_workspace_blocking(
+            root.to_string_lossy().into_owned(),
+            "Needle".into(),
+            None,
+            None,
+            None,
+        )
+        .expect("search");
+        assert_eq!(loose.matches.len(), 2, "case-insensitive by default");
+
+        let strict = search_workspace_blocking(
+            root.to_string_lossy().into_owned(),
+            "Needle".into(),
+            None,
+            Some(true),
+            None,
+        )
+        .expect("search");
+        assert_eq!(strict.matches.len(), 1, "only the exact casing matches");
+        fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn regex_search_matches_patterns_and_reports_bad_ones() {
+        let root = temp_root("regex");
+        write(&root.join("a.md"), "version 1.2.3\nversion 2.0.0\nnothing here\n");
+
+        let found = search_workspace_blocking(
+            root.to_string_lossy().into_owned(),
+            "version \\d+\\.\\d+".into(),
+            None,
+            Some(true),
+            Some(true),
+        )
+        .expect("search");
+        assert_eq!(found.matches.len(), 2, "the pattern matches two lines");
+
+        let bad = search_workspace_blocking(
+            root.to_string_lossy().into_owned(),
+            "(".into(),
+            None,
+            None,
+            Some(true),
+        );
+        assert!(bad.is_err(), "an invalid pattern is reported");
         fs::remove_dir_all(&root).ok();
     }
 }

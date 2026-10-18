@@ -284,6 +284,9 @@ export default function App() {
   const [searchBusy, setSearchBusy] = createSignal(false);
   /** Index of the content match the up/down buttons are sitting on. */
   const [matchIndex, setMatchIndex] = createSignal(-1);
+  const [searchCase, setSearchCase] = createSignal(false);
+  const [searchRegex, setSearchRegex] = createSignal(false);
+  const [searchError, setSearchError] = createSignal("");
   const [replaceText, setReplaceText] = createSignal("");
   const [replacing, setReplacing] = createSignal(false);
   /** Bumped after a workspace replace so the results refresh. */
@@ -2343,14 +2346,18 @@ export default function App() {
     setSearchBusy(true);
     searchTimer = setTimeout(() => {
       searchTimer = null;
-      void searchWorkspace(root, query, 200)
+      void searchWorkspace(root, query, 200, searchCase(), searchRegex())
         .then((result) => {
           if (seq !== searchSeq) return;
+          setSearchError("");
           setSearchHits(result);
           setMatchIndex(-1);
         })
         .catch(() => {
           if (seq !== searchSeq) return;
+          // The backend rejects an invalid pattern; say so instead of showing
+          // an empty result list as if nothing matched.
+          setSearchError(searchRegex() ? t(locale(), "searchBadPattern") : "");
           setSearchHits({ names: [], matches: [], truncated: false });
         })
         .finally(() => {
@@ -2381,6 +2388,11 @@ export default function App() {
   async function replaceInWorkspace() {
     const query = fileQuery().trim();
     if (!query || !isTauri() || replacing()) return;
+    if (searchRegex()) {
+      // A pattern can match text that a literal replacement cannot describe.
+      setNotice(t(locale(), "replaceNoRegex"));
+      return;
+    }
     const files = [...new Set(searchHits().matches.map((hit) => hit.path))];
     if (files.length === 0) return;
     const question = `${t(locale(), "replaceAll")} — ${files.length}\n\n${t(locale(), "replaceBackup")}`;
@@ -2405,7 +2417,7 @@ export default function App() {
       }
       try {
         const opened = await readDocument(path);
-        const result = replaceAllText(opened.content, query, replaceText());
+        const result = replaceAllText(opened.content, query, replaceText(), searchCase());
         if (result.count === 0) continue;
         // This operation has no undo, so a copy goes to the recovery folder
         // first. If the backup cannot be written, the file is left untouched.
@@ -2732,6 +2744,24 @@ export default function App() {
                 />
                 <button
                   type="button"
+                  class={`side-toggle${searchCase() ? " active" : ""}`}
+                  title={t(locale(), "matchCase")}
+                  aria-pressed={searchCase()}
+                  onClick={() => setSearchCase((value) => !value)}
+                >
+                  Aa
+                </button>
+                <button
+                  type="button"
+                  class={`side-toggle${searchRegex() ? " active" : ""}`}
+                  title={t(locale(), "useRegex")}
+                  aria-pressed={searchRegex()}
+                  onClick={() => setSearchRegex((value) => !value)}
+                >
+                  .*
+                </button>
+                <button
+                  type="button"
                   class="side-new"
                   title={t(locale(), "newFileHere")}
                   onClick={() => void newFileIn(prefs().workspaceRoot ?? "")}
@@ -2739,6 +2769,9 @@ export default function App() {
                   +
                 </button>
               </div>
+              <Show when={searchError()}>
+                <p class="side-empty">{searchError()}</p>
+              </Show>
             </Show>
             <Show when={prefs().panelMode === "outline"}>
               <input
@@ -2841,7 +2874,7 @@ export default function App() {
                         <button
                           type="button"
                           class="side-replace-go"
-                          disabled={replacing()}
+                          disabled={replacing() || searchRegex()}
                           onClick={() => void replaceInWorkspace()}
                         >
                           {t(locale(), "replaceAll")}
