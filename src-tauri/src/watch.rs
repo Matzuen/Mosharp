@@ -289,24 +289,38 @@ pub fn touch_file_watch_baseline(
     Ok(())
 }
 
-#[tauri::command]
-pub fn save_recovery_copy(suggested_name: String, content: String) -> Result<String, String> {
-    let dir = recovery_dir()?;
-
-    let stem = Path::new(&suggested_name)
+/// Keep the file name recognisable in the recovery folder.
+///
+/// Unicode letters are allowed through so a Chinese or Japanese name stays
+/// readable; everything that could change the path (separators, dots, colons)
+/// becomes an underscore.
+fn safe_stem(name: &str) -> String {
+    let stem = Path::new(name)
         .file_stem()
         .and_then(|value| value.to_str())
         .unwrap_or("untitled");
-    let safe: String = stem
+    let cleaned: String = stem
         .chars()
         .map(|ch| {
-            if ch.is_ascii_alphanumeric() || ch == '-' || ch == '_' {
+            if ch.is_alphanumeric() || ch == '-' || ch == '_' {
                 ch
             } else {
                 '_'
             }
         })
         .collect();
+    if cleaned.trim_matches('_').is_empty() {
+        "untitled".to_string()
+    } else {
+        cleaned
+    }
+}
+
+#[tauri::command]
+pub fn save_recovery_copy(suggested_name: String, content: String) -> Result<String, String> {
+    let dir = recovery_dir()?;
+
+    let safe = safe_stem(&suggested_name);
     // Millisecond stamp plus a create-exclusive retry: several tabs can be
     // discarded in the same second and every copy must survive on its own.
     let stamp = SystemTime::now()
@@ -353,4 +367,25 @@ fn recovery_dir() -> Result<PathBuf, String> {
 #[tauri::command]
 pub fn recovery_folder() -> Result<String, String> {
     recovery_dir().map(|dir| dir.to_string_lossy().into_owned())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::safe_stem;
+
+    #[test]
+    fn keeps_readable_names() {
+        assert_eq!(safe_stem("笔记.md"), "笔记");
+        assert_eq!(safe_stem("daily-note.md"), "daily-note");
+        assert_eq!(safe_stem("未命名"), "未命名");
+    }
+
+    #[test]
+    fn strips_path_separators_and_spaces() {
+        // `Path::file_stem` already drops directories, so only the remaining
+        // characters need cleaning.
+        assert_eq!(safe_stem("../etc/passwd.md"), "passwd");
+        assert_eq!(safe_stem("a b.md"), "a_b");
+        assert_eq!(safe_stem("笔记 2024.md"), "笔记_2024");
+    }
 }

@@ -2313,7 +2313,7 @@ export default function App() {
     if (!query || !isTauri() || replacing()) return;
     const files = [...new Set(searchHits().matches.map((hit) => hit.path))];
     if (files.length === 0) return;
-    const question = `${t(locale(), "replaceAll")} — ${files.length}`;
+    const question = `${t(locale(), "replaceAll")} — ${files.length}\n\n${t(locale(), "replaceBackup")}`;
     let confirmed = false;
     try {
       confirmed = isTauri()
@@ -2336,6 +2336,9 @@ export default function App() {
         const opened = await readDocument(path);
         const result = replaceAllText(opened.content, query, replaceText());
         if (result.count === 0) continue;
+        // This operation has no undo, so a copy goes to the recovery folder
+        // first. If the backup cannot be written, the file is left untouched.
+        await saveRecoveryCopy(`替换前-${documentName(path, "doc")}`, opened.content);
         // Keep the watcher quiet: we already know we changed the file.
         await suppressFileWatch(path);
         await writeDocument(path, result.text, normalizeEncoding(opened.encoding));
