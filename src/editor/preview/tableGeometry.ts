@@ -58,11 +58,55 @@ export function fitsCount(widths: ColumnWidths, count: number): boolean {
 }
 
 /**
- * Stable key for remembering widths across widget rebuilds.
+ * Session memory for dragged column widths.
  *
- * The column count plus the header text identifies a table well enough in
- * practice; a table whose header is edited loses its custom widths, which is
- * better than applying them to an unrelated table.
+ * Widths are keyed by table header, but the header text changes when the user
+ * renames a column or reorders columns — the same table would then lose its
+ * widths. `last` remembers where the previous table was drawn, so a table found
+ * at the same document position is recognised as "the same table, new key" and
+ * its widths are migrated instead of dropped.
+ */
+export interface WidthMemory {
+  byKey: Map<string, ColumnWidths>;
+  last: { from: number; widths: ColumnWidths } | null;
+}
+
+export function createWidthMemory(): WidthMemory {
+  return { byKey: new Map(), last: null };
+}
+
+/** Widths to use for the table at `from`, or null to fall back to even columns. */
+export function pickWidths(
+  memory: WidthMemory,
+  key: string,
+  from: number,
+  columns: number,
+): ColumnWidths | null {
+  const direct = memory.byKey.get(key);
+  if (direct && fitsCount(direct, columns)) return direct;
+  // Same position as the last table we knew about: its header changed, but the
+  // layout still belongs to this table.
+  if (memory.last && memory.last.from === from && fitsCount(memory.last.widths, columns)) {
+    memory.byKey.set(key, memory.last.widths);
+    return memory.last.widths;
+  }
+  return null;
+}
+
+export function storeWidths(
+  memory: WidthMemory,
+  key: string,
+  from: number,
+  widths: ColumnWidths,
+): void {
+  memory.byKey.set(key, widths);
+  memory.last = { from, widths };
+}
+
+/**
+ * Key for remembering widths, derived from the column count and header text.
+ * It is only an index: the same table keeps its widths across header edits and
+ * column reordering through `WidthMemory.last`.
  */
 export function tableKey(headerCells: string[], columnCount: number): string {
   const header = headerCells.map((cell) => cell.trim()).join("|");

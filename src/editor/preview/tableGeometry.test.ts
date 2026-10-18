@@ -1,9 +1,12 @@
 import {
   MIN_COLUMN_WIDTH,
+  createWidthMemory,
   dragColumn,
   evenWidths,
   fitsCount,
+  pickWidths,
   scrollStep,
+  storeWidths,
   tableKey,
 } from "./tableGeometry.ts";
 
@@ -63,5 +66,28 @@ assert(scrollStep(0, 800, 795) > 0, "near the bottom edge scrolls down");
 assert(Math.abs(scrollStep(0, 800, 0)) <= 24, "the step is capped");
 assert(Math.abs(scrollStep(0, 800, 2)) >= Math.abs(scrollStep(0, 800, 20)), "deeper past the edge scrolls faster");
 assert(scrollStep(0, 40, 20) === 0, "a scroller smaller than two bands does not auto-scroll");
+
+// Width memory survives header edits and column reordering.
+const memory = createWidthMemory();
+const threeColumns = evenWidths(3, 300);
+const custom = dragColumn(threeColumns, 1, 40);
+const before = tableKey(["名称", "数量", "备注"], 3);
+assert(pickWidths(memory, before, 100, 3) === null, "nothing remembered yet");
+
+storeWidths(memory, before, 100, custom);
+assert(pickWidths(memory, before, 100, 3) === custom, "a known table gets its widths back");
+
+// Renaming a header changes the key but not the table position.
+const renamed = tableKey(["名称", "数目", "备注"], 3);
+assert(pickWidths(memory, renamed, 100, 3) === custom, "a renamed header keeps the widths");
+
+// A different table at a different position gets nothing.
+const other = tableKey(["名称", "数量", "备注"], 3);
+assert(pickWidths(memory, other, 900, 3) === custom, "the same key is still a hit");
+const unrelated = tableKey(["苹果", "香蕉", "梨"], 3);
+assert(pickWidths(memory, unrelated, 900, 3) === null, "another table starts from even columns");
+
+// A stored width list that no longer matches the column count is ignored.
+assert(pickWidths(memory, before, 100, 5) === null, "a mismatched column count is ignored");
 
 console.log("tableGeometry ok");

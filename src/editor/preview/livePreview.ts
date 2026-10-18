@@ -20,7 +20,15 @@ import { diagramKind } from "./diagramKind";
 import { notify } from "./notify";
 import { insideStrictly } from "./cursorScope";
 import { frontMatterLines } from "./frontMatter";
-import { dragColumn, evenWidths, scrollStep, tableKey, type ColumnWidths } from "./tableGeometry";
+import {
+  createWidthMemory,
+  dragColumn,
+  evenWidths,
+  pickWidths,
+  scrollStep,
+  storeWidths,
+  tableKey,
+} from "./tableGeometry";
 import { MAX_ENTRIES, TocScan, type TocEntry } from "./toc";
 import { sanitizeHtml } from "../../export/sanitize";
 import { focusModeField, sourceModeField } from "./modes";
@@ -60,11 +68,11 @@ const ALIGN_ORDER = ["left", "center", "right"] as const;
 let pendingCellFocus: { from: number; row: number; col: number } | null = null;
 
 /**
- * Column widths dragged by the user, keyed by table header. Session-scoped on
- * purpose: Markdown has no place to store display widths, and writing them into
- * the delimiter row would change the file's meaning.
+ * Column widths dragged by the user. Session-scoped on purpose: Markdown has no
+ * place to store display widths, and writing them into the delimiter row would
+ * change the file's meaning.
  */
-const columnWidths = new Map<string, ColumnWidths>();
+const widthMemory = createWidthMemory();
 
 /** Docs at/above this line count: decorate only after scroll settles. */
 const LARGE_DOC_LINES = 8_000;
@@ -478,7 +486,7 @@ class TableWidget extends WidgetType {  dom: HTMLElement | null = null;
     const key = tableKey(header, header.length);
     const colgroup = document.createElement("colgroup");
     const columns: HTMLTableColElement[] = [];
-    const remembered = columnWidths.get(key);
+    const remembered = pickWidths(widthMemory, key, this.from, header.length);
     for (let i = 0; i < header.length; i += 1) {
       const col = document.createElement("col");
       if (remembered) col.style.width = `${remembered.widths[i]}px`;
@@ -530,7 +538,7 @@ class TableWidget extends WidgetType {  dom: HTMLElement | null = null;
         handle.removeEventListener("pointerup", done);
         handle.removeEventListener("pointercancel", done);
         wrap.classList.remove("cm-md-table-resizing");
-        columnWidths.set(key, widths);
+        storeWidths(widthMemory, key, this.from, widths);
       };
       handle.addEventListener("pointermove", move);
       handle.addEventListener("pointerup", done);
