@@ -74,8 +74,14 @@ import { langMenuPlugin } from "./preview/langMenu";
 import { formatToolbarPlugin, formatToolbarTheme } from "./preview/toolbar";
 import { typewriterPlugin } from "./preview/typewriter";
 import { editorTheme } from "./theme";
+import { IS_DEV } from "../shell/env";
 
-export const INITIAL_DOCUMENT = `# 未命名
+/**
+ * Sample document for a brand-new buffer. Development only: a release build
+ * starts with an empty document instead of sample content the user has to
+ * delete first.
+ */
+const WELCOME_DOCUMENT = `# 未命名
 
 在这里开始写。**加粗**、*斜体*、\`行内代码\`、==高亮== 和 [链接](https://example.com) 都会按排版显示。
 
@@ -110,6 +116,8 @@ graph LR
 const hello = "world"
 \`\`\`
 `;
+
+export const INITIAL_DOCUMENT = IS_DEV ? WELCOME_DOCUMENT : "";
 
 export interface EditorStats {
   lines: number;

@@ -83,6 +83,7 @@ import { CommandPalette, type PaletteAction } from "./shell/CommandPalette";
 import { MenuBar, type MenuDef, type MenuEntry } from "./shell/MenuBar";
 import { SettingsDialog } from "./shell/SettingsDialog";
 import { RecoveryDialog } from "./shell/RecoveryDialog";
+import { IS_DEV } from "./shell/env";
 import { chordFromEvent } from "./shell/shortcuts";
 import { ancestorPaths, isInside } from "./shell/treePaths";
 import {
@@ -1321,6 +1322,8 @@ export default function App() {
   }
 
   async function loadBenchmark() {
+    // Reachable from the command line only in dev builds.
+    if (!IS_DEV) return;
     if (!editor) return;
     setNotice(`${t(locale(), "benchmark")} …`);
     await new Promise<void>((resolve) => setTimeout(resolve, 0));
@@ -1710,7 +1713,11 @@ export default function App() {
             shortcut: shortcut("commandPalette"),
             run: () => setPaletteOpen(true),
           },
-          { id: "benchmark", label: label("benchmark"), run: () => void loadBenchmark() },
+          // Development-only: generating 100k lines is a diagnostic, not a
+          // feature a release build should advertise.
+          ...(IS_DEV
+            ? [{ id: "benchmark", label: label("benchmark"), run: () => void loadBenchmark() }]
+            : []),
           { id: "sep-help", sep: true },
           {
             id: "open-recovery",
