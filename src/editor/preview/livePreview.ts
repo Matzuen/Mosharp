@@ -332,14 +332,16 @@ class TocWidget extends WidgetType {
     readonly from: number,
     /** Document size at build time; any edit of that size invalidates the DOM. */
     readonly size: number,
+    /** Bumped when an edit touches a heading line, which keeps the size equal. */
+    readonly revision: number,
   ) {
     super();
   }
 
   eq(other: TocWidget) {
-    // `from` alone is not enough: editing a heading must refresh the rendered
-    // list, and a changed document always changes its length.
-    return other.from === this.from && other.size === this.size;
+    // `size` alone is not enough: retyping a heading keeps the length unchanged,
+    // so heading edits are tracked separately.
+    return other.from === this.from && other.size === this.size && other.revision === this.revision;
   }
 
   toDOM(view: EditorView) {
@@ -445,8 +447,20 @@ class TableWidget extends WidgetType {
       run("row-below");
     };
 
-    const thead = document.createElement("thead");
-    thead.appendChild(renderRow(header, aligns, "th", 0, commitAt, activateAt, view, handleTab));
+    // Leave the table entirely: the caret goes to the line after it, which also
+    // brings the Markdown source back.
+    const exitTable = () => {
+      const end = Math.min(this.from + this.source.length + 1, view.state.doc.length);
+      view.dispatch({
+        selection: { anchor: end },
+        effects: EditorView.scrollIntoView(end),
+      });
+      view.focus();
+    };
+
+    const thead = document.createElement("thead");    thead.appendChild(
+      renderRow(header, aligns, "th", 0, commitAt, activateAt, view, handleTab, exitTable),
+    );
     table.appendChild(thead);
 
     const tbody = document.createElement("tbody");
@@ -454,7 +468,17 @@ class TableWidget extends WidgetType {
     for (let i = bodyStart; i < lines.length; i += 1) {
       if (isDelimiterRow(lines[i])) continue;
       tbody.appendChild(
-        renderRow(splitCells(lines[i]), aligns, "td", visualRow, commitAt, activateAt, view, handleTab),
+        renderRow(
+          splitCells(lines[i]),
+          aligns,
+          "td",
+          visualRow,
+          commitAt,
+          activateAt,
+          view,
+          handleTab,
+          exitTable,
+        ),
       );
       visualRow += 1;
     }
@@ -666,6 +690,7 @@ function renderRow(
   onActivate: (row: number, col: number) => void,
   view: EditorView,
   onTab: (delta: number) => void,
+  onExit: () => void,
 ) {
   const row = document.createElement("tr");
   for (let i = 0; i < cells.length; i += 1) {
@@ -720,6 +745,13 @@ function renderRow(
         // Tab walks the cells instead of leaving the table on the first press.
         event.preventDefault();
         onTab(event.shiftKey ? -1 : 1);
+        return;
+      }
+      if (event.key === "Escape") {
+        // The way out of the table: Tab only ever moves between cells.
+        event.preventDefault();
+        commit();
+        onExit();
         return;
       }
       if (event.key === "Enter" && event.shiftKey) {
@@ -1332,6 +1364,33 @@ function buildDecorations(view: EditorView): {
   }
 }
 
+/**
+ * Counts edits that touch a heading line. The TOC widget compares document
+ * length, but retyping a heading keeps that length unchanged, so heading edits
+ * need their own signal to force a re-render.
+ */
+let tocRevision = 0;
+
+function isHeadingLine(doc: Text, pos: number): boolean {
+  const line = doc.lineAt(Math.min(Math.max(pos, 0), doc.length));
+  return /^\s{0,3}#{1,6}\s/.test(line.text);
+}
+
+function bumpTocRevision(update: ViewUpdate) {
+  let touched = false;
+  update.changes.iterChanges((fromA, toA, fromB, toB) => {
+    if (touched) return;
+    if (isHeadingLine(update.state.doc, fromB) || isHeadingLine(update.state.doc, toB)) {
+      touched = true;
+      return;
+    }
+    if (isHeadingLine(update.startState.doc, fromA) || isHeadingLine(update.startState.doc, toA)) {
+      touched = true;
+    }
+  });
+  if (touched) tocRevision += 1;
+}
+
 /** Locate a leading YAML block, independent of where the caret is. */
 function frontMatterRange(view: EditorView) {
   const doc = view.state.doc;
@@ -1381,8 +1440,7 @@ function decorateFrontMatter(
   spanLabel(build, doc, found.open, found.close);
 }
 
-/** `[TOC]` becomes a clickable outline; the caret on the line keeps the source. */
-function decorateToc(view: EditorView, from: number, to: number, build: PreviewBuild) {
+/** `[TOC]` becomes a clickable outline; the caret on the line keeps the source. */function decorateToc(view: EditorView, from: number, to: number, build: PreviewBuild) {
   const doc = view.state.doc;
   const first = doc.lineAt(from).number;
   const last = doc.lineAt(Math.min(to, doc.length)).number;
@@ -1392,7 +1450,7 @@ function decorateToc(view: EditorView, from: number, to: number, build: PreviewB
     if (isCovered(build, line.from, line.to)) continue;
     if (rangeHasCursor(view, line.from, line.to)) continue;
     const deco = Decoration.replace({
-      widget: new TocWidget(line.from, view.state.doc.length),
+      widget: new TocWidget(line.from, view.state.doc.length, tocRevision),
     }).range(line.from, line.to);
     build.decos.push(deco);
     build.atomic.push(deco);
@@ -1476,6 +1534,7 @@ export const livePreviewPlugin = ViewPlugin.fromClass(
         tr.effects.some((effect) => effect.is(refreshPreview)),
       );
       if (update.docChanged || update.selectionSet || modesChanged || treeChanged || refreshed) {
+        if (update.docChanged) bumpTocRevision(update);
         this.clearIdle();
         this.apply(update.view);
         return;

@@ -1040,8 +1040,7 @@ export default function App() {
       setNotice(t(locale(), "closeBeforeDelete"));
       return;
     }
-    if (!window.confirm(`${t(locale(), "remove")} ${documentName(path, "")}?`)) return;
-    try {
+    if (!window.confirm(`${t(locale(), "remove")} ${documentName(path, "")}?`)) return;    try {
       await deleteEntry(path);
       if (open) await closeTab(open.id);
       await reloadTree();
@@ -2314,7 +2313,16 @@ export default function App() {
     if (!query || !isTauri() || replacing()) return;
     const files = [...new Set(searchHits().matches.map((hit) => hit.path))];
     if (files.length === 0) return;
-    if (!window.confirm(`${t(locale(), "replaceAll")} — ${files.length}`)) return;
+    const question = `${t(locale(), "replaceAll")} — ${files.length}`;
+    let confirmed = false;
+    try {
+      confirmed = isTauri()
+        ? await ask(question, { title: "Mosharp", kind: "warning" })
+        : window.confirm(question);
+    } catch {
+      confirmed = window.confirm(question);
+    }
+    if (!confirmed) return;
     setReplacing(true);
     let edited = 0;
     let hits = 0;
@@ -2785,6 +2793,11 @@ export default function App() {
         <span class="status-format" title={fileFormat()}>
           {fileFormat()}
         </span>
+        <Show when={prefs().autoSave}>
+          <span class="status-autosave" title={t(locale(), "autoSave")}>
+            {t(locale(), "autoSaveOn")}
+          </span>
+        </Show>
         <span class="status-path" title={activeTab()?.path ?? ""}>
           {activeTab()?.path ?? t(locale(), "notWritten")}
         </span>
