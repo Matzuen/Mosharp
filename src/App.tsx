@@ -83,6 +83,7 @@ import { CommandPalette, type PaletteAction } from "./shell/CommandPalette";
 import { MenuBar, type MenuDef, type MenuEntry } from "./shell/MenuBar";
 import { SettingsDialog } from "./shell/SettingsDialog";
 import { chordFromEvent } from "./shell/shortcuts";
+import { ancestorPaths, isInside } from "./shell/treePaths";
 import {
   clampPanelWidth,
   clampZoom,
@@ -161,14 +162,6 @@ function joinPath(folder: string, name: string): string {
   if (!folder) return name;
   const separator = folder.includes("\\") ? "\\" : "/";
   return `${folder.replace(/[\\/]+$/, "")}${separator}${name}`;
-}
-
-/** True when `path` is `folder` itself or somewhere below it. */
-export function isInside(path: string, folder: string): boolean {
-  const normalize = (value: string) => value.replace(/\\/g, "/").toLowerCase();
-  const child = normalize(path);
-  const root = normalize(folder).replace(/\/+$/, "");
-  return child === root || child.startsWith(`${root}/`);
 }
 
 function fileTitle(path: string | null, dirty: boolean, untitled: string): string {
@@ -940,6 +933,53 @@ export default function App() {
         expanded: true,
         children: applyExpanded(withDepth, expanded, depth + 1),
       };
+    });
+  }
+
+  /** Find a node by path anywhere in the loaded tree. */
+  function findTreeNode(nodes: TreeNode[], path: string): TreeNode | null {
+    for (const node of nodes) {
+      if (samePath(node.path, path)) return node;
+      if (node.children) {
+        const hit = findTreeNode(node.children, path);
+        if (hit) return hit;
+      }
+    }
+    return null;
+  }
+
+  /**
+   * Expand the folders leading to `path` and scroll its row into view, so the
+   * file you are editing is visible in the tree instead of hidden behind
+   * collapsed folders.
+   */
+  let revealing = false;
+  async function revealInTree(path: string | null) {
+    const root = prefs().workspaceRoot;
+    if (!path || !root || !isTauri() || revealing) return;
+    const folders = ancestorPaths(root, path);
+    if (folders.length === 0) {
+      scrollRowIntoView(path);
+      return;
+    }
+    revealing = true;
+    try {
+      for (const folder of folders) {
+        const node = findTreeNode(tree(), folder);
+        if (node?.is_dir && !node.expanded) await toggleDir(node);
+      }
+    } catch {
+      // A folder that disappeared is not worth a message.
+    } finally {
+      revealing = false;
+    }
+    scrollRowIntoView(path);
+  }
+
+  function scrollRowIntoView(path: string) {
+    requestAnimationFrame(() => {
+      const selector = `[data-path="${CSS.escape(path)}"]`;
+      document.querySelector<HTMLElement>(selector)?.scrollIntoView({ block: "nearest" });
     });
   }
 
@@ -2197,6 +2237,16 @@ export default function App() {
   }
 
   const flatTree = createMemo(() => flattenTree(tree()));
+
+  // Keep the active file visible in the tree. Runs after the tab switch settles
+  // so the tree state is read outside this reactive computation.
+  createEffect(() => {
+    const path = activeTab()?.path ?? null;
+    const root = prefs().workspaceRoot;
+    if (!path || !root) return;
+    if (!prefs().panelOpen || prefs().panelMode !== "files") return;
+    Promise.resolve().then(() => void revealInTree(path));
+  });
   /** Outline filtered by the panel's own search box. */
   const visibleOutline = createMemo(() => {
     const query = outlineQuery().trim().toLowerCase();
@@ -2698,6 +2748,7 @@ export default function App() {
                               type="button"
                               role="treeitem"
                               aria-expanded={node.is_dir ? node.expanded : undefined}
+                              data-path={node.path}
                               class={`tree-item${node.is_dir ? " dir" : ""}${
                                 samePath(node.path, activeTab()?.path) ? " current" : ""
                               }`}
