@@ -2141,6 +2141,8 @@ export const livePreviewTheme = EditorView.baseTheme({
     border: "1px solid var(--table-border)",
     padding: "6px 10px",
     verticalAlign: "top",
+    // Anchor for the row grip and the column resize grip.
+    position: "relative",
   },
   ".cm-md-table-widget tbody tr:nth-child(even) td": {
     backgroundColor: "var(--table-stripe)",
