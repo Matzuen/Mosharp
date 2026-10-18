@@ -30,6 +30,8 @@ import {
   storeWidths,
   tableKey,
 } from "./tableGeometry";
+import { getWidths, parseStore, serialize, setWidths, type WidthRecord } from "./tableWidthStore";
+import type { ColumnWidths } from "./tableGeometry";
 import { MAX_ENTRIES, TocScan, type TocEntry } from "./toc";
 import { sanitizeHtml } from "../../export/sanitize";
 import { focusModeField, sourceModeField } from "./modes";
@@ -74,6 +76,47 @@ let pendingCellFocus: { from: number; row: number; col: number } | null = null;
  * change the file's meaning.
  */
 const widthMemory = createWidthMemory();
+
+/** Document whose tables are being edited; empty means "not saved yet". */
+let widthScope = "";
+
+const WIDTH_STORE_KEY = "mosharp.tableWidths";
+let widthStore: WidthRecord = (() => {
+  try {
+    return parseStore(localStorage.getItem(WIDTH_STORE_KEY));
+  } catch {
+    return {};
+  }
+})();
+let widthSaveTimer: ReturnType<typeof setTimeout> | null = null;
+
+/** Called when the editor switches documents, so widths are per file. */
+export function setWidthScope(path: string | null) {
+  widthScope = path ?? "";
+}
+
+function storedColumnWidths(key: string, columns: number): ColumnWidths | null {
+  if (!widthScope) return null;
+  const widths = getWidths(widthStore, widthScope, key);
+  if (!widths || widths.length !== columns) return null;
+  return { widths: widths.slice(), total: widths.reduce((sum, width) => sum + width, 0) };
+}
+
+function rememberColumnWidths(key: string, widths: number[]) {
+  if (!widthScope) return;
+  widthStore = setWidths(widthStore, widthScope, key, widths);
+  if (widthSaveTimer) clearTimeout(widthSaveTimer);
+  // Debounced: a drag produces one write per pointer move otherwise.
+  widthSaveTimer = setTimeout(() => {
+    widthSaveTimer = null;
+    try {
+      localStorage.setItem(WIDTH_STORE_KEY, serialize(widthStore));
+    } catch {
+      // Full storage only costs the remembered widths.
+    }
+  }, 400);
+}
+
 
 /** Docs at/above this line count: decorate only after scroll settles. */
 const LARGE_DOC_LINES = 8_000;
@@ -521,7 +564,9 @@ class TableWidget extends WidgetType {  dom: HTMLElement | null = null;
     const key = tableKey(header, header.length);
     const colgroup = document.createElement("colgroup");
     const columns: HTMLTableColElement[] = [];
-    const remembered = pickWidths(widthMemory, key, this.from, header.length);
+    const remembered =
+      pickWidths(widthMemory, key, this.from, header.length) ??
+      storedColumnWidths(key, header.length);
     for (let i = 0; i < header.length; i += 1) {
       const col = document.createElement("col");
       if (remembered) col.style.width = `${remembered.widths[i]}px`;
@@ -574,6 +619,7 @@ class TableWidget extends WidgetType {  dom: HTMLElement | null = null;
         handle.removeEventListener("pointercancel", done);
         wrap.classList.remove("cm-md-table-resizing");
         storeWidths(widthMemory, key, this.from, widths);
+        rememberColumnWidths(key, widths.widths);
       };
       handle.addEventListener("pointermove", move);
       handle.addEventListener("pointerup", done);

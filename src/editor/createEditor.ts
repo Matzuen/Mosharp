@@ -38,6 +38,7 @@ import { caretAfterLink, isOnlyUrl, linkMarkdown } from "./pasteLink";
 import { blockStarter, emptyFenceRange, fenceCloseText, fenceOpener } from "./autoBlock";
 import { setPandocMath } from "./preview/math";
 import {
+  setWidthScope,
   hiddenLineNumberField,
   hiddenMarkersAt,
   livePreviewPlugin,
@@ -609,6 +610,8 @@ export function createEditor(
     },
     setDocumentPath: (path) => {
       setActiveDocumentPath(path);
+      // Column widths are remembered per document.
+      setWidthScope(path);
       view.dispatch({ effects: refreshPreview.of(null) });
     },
     setSpellcheck: (enabled, lang) => {
