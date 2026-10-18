@@ -276,6 +276,43 @@ async function main() {
     );
     await mouse(cdp, "mouseReleased", cells[1].x, cells[1].y);
     check("dragging across cells selects them", selected >= 2, `got ${selected}`);
+
+    /*
+     * Marker reveal: a heading shows its `#` only while the caret is on that
+     * line. This is the mechanism the whole "hidden markers" model rests on, so
+     * it is worth pinning down: if it breaks, editing markers becomes
+     * impossible in one direction or the other.
+     */
+    console.log("marker reveal");
+    await cdp.evaluate("document.querySelector('.cm-content').focus()");
+    await selectAll(cdp);
+    await type(cdp, "# 标题\n");
+    await sleep(500);
+    const headingBox = await cdp.evaluate(`(() => {
+      const line = document.querySelector('.cm-line');
+      const box = line.getBoundingClientRect();
+      return { x: box.left + 40, y: box.top + box.height / 2, y2: box.top + box.height + 12 };
+    })()`);
+    await mouse(cdp, "mousePressed", headingBox.x, headingBox.y);
+    await mouse(cdp, "mouseReleased", headingBox.x, headingBox.y);
+    await sleep(350);
+    const onLine = await cdp.evaluate("document.querySelector('.cm-line').textContent");
+    check(
+      "the marker is visible while the caret is on the line",
+      String(onLine).includes("#"),
+      JSON.stringify(onLine),
+    );
+
+    // Move the caret to the empty line below: the marker goes back into hiding.
+    await mouse(cdp, "mousePressed", headingBox.x, headingBox.y2);
+    await mouse(cdp, "mouseReleased", headingBox.x, headingBox.y2);
+    await sleep(350);
+    const offLine = await cdp.evaluate("document.querySelector('.cm-line').textContent");
+    check(
+      "the marker hides again when the caret leaves",
+      !String(offLine).includes("#"),
+      JSON.stringify(offLine),
+    );
   } finally {
     cdp?.close();
     await cleanup();

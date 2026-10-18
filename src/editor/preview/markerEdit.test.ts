@@ -1,4 +1,4 @@
-import { advanceOverMarkers, extendDeletion } from "./markerEdit.ts";
+import { extendDeletion } from "./markerEdit.ts";
 
 function assert(condition: boolean, message: string): void {
   if (!condition) throw new Error(message);
@@ -27,15 +27,5 @@ assert(extendDeletion([], 4, false) === null, "no markers, no extension");
 // A marker starting the line ("# ") behaves the same way.
 const heading = [{ from: 0, to: 2 }];
 assert(extendDeletion(heading, 2, false)?.to === 2, "heading marker is removed as a unit");
-
-// Home skips over markers at the start of a line.
-assert(advanceOverMarkers(heading, 0) === 2, "Home lands after the heading marker");
-const nested = [
-  { from: 0, to: 3 },
-  { from: 3, to: 5 },
-];
-assert(advanceOverMarkers(nested, 0) === 5, "consecutive markers are skipped");
-assert(advanceOverMarkers(heading, 5) === 5, "no marker at the position, nothing moves");
-assert(advanceOverMarkers([], 0) === 0, "no markers at all");
 
 console.log("markerEdit ok");

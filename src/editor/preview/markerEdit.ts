@@ -41,20 +41,3 @@ export function extendDeletion(
   }
   return null;
 }
-
-/**
- * Position after the run of hidden markers that starts at `pos`.
- *
- * Home on `## **Title**` should reach the start of the visible text, not the
- * position in front of the hidden `## `.
- */
-export function advanceOverMarkers(markers: readonly Range[], pos: number): number {
-  let current = pos;
-  // Bounded: a line cannot chain more than a few markers.
-  for (let guard = 0; guard < 8; guard += 1) {
-    const next = markers.find((marker) => marker.from === current);
-    if (!next || next.to <= current) break;
-    current = next.to;
-  }
-  return current;
-}
