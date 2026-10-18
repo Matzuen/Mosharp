@@ -313,6 +313,50 @@ async function main() {
       !String(offLine).includes("#"),
       JSON.stringify(offLine),
     );
+
+    /*
+     * Inline HTML: `文字 <b>粗</b> 文字` renders the bold part, and clicking it
+     * brings the source back. The raw tags must not appear in the rendered text.
+     */
+    console.log("inline html");
+    await cdp.evaluate("document.querySelector('.cm-content').focus()");
+    await selectAll(cdp);
+    await type(cdp, "前 <b>粗</b> 后\n");
+    await sleep(500);
+    const inline = await cdp.evaluate(`(() => {
+      const widget = document.querySelector('.cm-md-inline-html');
+      const line = document.querySelector('.cm-line');
+      return {
+        count: document.querySelectorAll('.cm-md-inline-html').length,
+        tag: widget ? widget.tagName : null,
+        bold: !!widget && !!widget.querySelector('b'),
+        text: line ? line.textContent : '',
+      };
+    })()`);
+    check("inline html renders as a widget", inline.count === 1, JSON.stringify(inline));
+    check("the rendered element is bold", inline.bold === true, JSON.stringify(inline));
+    check("the raw tags are not visible", !String(inline.text).includes("<b>"), JSON.stringify(inline.text));
+
+    const widgetBox = await cdp.evaluate(`(() => {
+      const widget = document.querySelector('.cm-md-inline-html');
+      if (!widget) return null;
+      const box = widget.getBoundingClientRect();
+      return { x: box.left + box.width / 2, y: box.top + box.height / 2 };
+    })()`);
+    if (widgetBox) {
+      await mouse(cdp, "mousePressed", widgetBox.x, widgetBox.y);
+      await mouse(cdp, "mouseReleased", widgetBox.x, widgetBox.y);
+      await sleep(350);
+      const revealed = await cdp.evaluate(`(() => ({
+        widgets: document.querySelectorAll('.cm-md-inline-html').length,
+        text: document.querySelector('.cm-line').textContent,
+      }))()`);
+      check(
+        "clicking the inline html shows its source",
+        revealed.widgets === 0 && String(revealed.text).includes("<b>"),
+        JSON.stringify(revealed),
+      );
+    }
   } finally {
     cdp?.close();
     await cleanup();

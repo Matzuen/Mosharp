@@ -20,6 +20,7 @@ import { diagramKind } from "./diagramKind";
 import { notify } from "./notify";
 import { insideStrictly } from "./cursorScope";
 import { frontMatterLines } from "./frontMatter";
+import { matchInlineTag } from "./inlineHtml";
 import {
   createWidthMemory,
   dragColumn,
@@ -226,6 +227,40 @@ class HtmlBlockWidget extends WidgetType {
       view.focus();
     });
     return wrap;
+  }
+
+  ignoreEvent() {
+    return true;
+  }
+}
+
+/** Inline HTML such as `<b>粗</b>`, rendered in place and revealed on click. */
+class InlineHtmlWidget extends WidgetType {
+  constructor(
+    readonly raw: string,
+    readonly caretAt: number,
+  ) {
+    super();
+  }
+
+  eq(other: InlineHtmlWidget) {
+    return other.raw === this.raw && other.caretAt === this.caretAt;
+  }
+
+  toDOM(view: EditorView) {
+    const span = document.createElement("span");
+    span.className = "cm-md-inline-html";
+    span.innerHTML = sanitizeHtml(this.raw);
+    // Pointer events: CodeMirror stops mousedown propagation before widgets.
+    span.addEventListener("pointerdown", (event) => {
+      if (event.button !== 0) return;
+      event.preventDefault();
+      event.stopPropagation();
+      const at = Math.min(this.caretAt, view.state.doc.length);
+      view.dispatch({ selection: { anchor: at } });
+      view.focus();
+    });
+    return span;
   }
 
   ignoreEvent() {
@@ -1484,6 +1519,28 @@ function decorateRange(
             }
             build.covered.push({ from: startLine.from, to: endLine.to });
             spanLabel(build, doc, startLine.number, endLine.number);
+          }
+        }
+      }
+
+      if (name === "HTMLTag") {
+        // Inline HTML: the parser gives us the opening and closing tag as two
+        // separate nodes, so the pair is matched by hand and the whole construct
+        // is rendered at once. The caret inside it shows the source again.
+        const doc = view.state.doc;
+        const line = doc.lineAt(node.from);
+        const match = matchInlineTag(line.text, node.from - line.from);
+        if (match) {
+          const to = line.from + match.end;
+          if (!isCovered(build, node.from, to) && !rangeHasCursor(view, node.from, to)) {
+            if (sanitizeHtml(match.raw).trim().length > 0) {
+              const deco = Decoration.replace({
+                widget: new InlineHtmlWidget(match.raw, node.from),
+              }).range(node.from, to);
+              build.decos.push(deco);
+              build.atomic.push(deco);
+              build.covered.push({ from: node.from, to });
+            }
           }
         }
       }
