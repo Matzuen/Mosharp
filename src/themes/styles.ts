@@ -13,3 +13,7 @@ import "./nord.css";
 import "./gruvbox.css";
 import "./dracula.css";
 import "./material-dark.css";
+import "./dawn.css";
+import "./celadon.css";
+import "./dusk.css";
+import "./ember.css";

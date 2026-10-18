@@ -1,0 +1,53 @@
+/* 青瓷 (Celadon)
+   scheme: light
+   set: soft
+   变量说明见同目录 README.md。 */
+html[data-theme="celadon"] {
+  color-scheme: light;
+  --paper: #f1f4f0;
+  --ink: #38403b;
+  --muted: #646c66;
+  --faint: #8d968f;
+  --line: #dfe5dc;
+  --bar: #e8ede5;
+  --chrome: #e8ede5;
+  --accent: #3f6b52;
+  --link: #3f6b52;
+  --menu: #e8ede5;
+  --hover: rgba(50, 80, 62, 0.07);
+  --side: #eaefe7;
+  --code-bg: rgba(63, 107, 82, 0.1);
+  --code-block: #e9efe6;
+  --code-ink: #3f6b52;
+  --code-block-ink: #333834;
+  --quote: #626a63;
+  --quote-border: #b9c9b8;
+  --highlight: rgba(196, 214, 150, 0.35);
+  --selection: rgba(63, 107, 82, 0.18);
+  --danger: #b0463c;
+  --on-danger: #ffffff;
+  --h1: #3f6b52;
+  --h2: #3c443e;
+  --h3: #5e6b61;
+  --h4: #5e6b61;
+  --h1-size: 1.62em;
+  --h2-size: 1.34em;
+  --h3-size: 1.15em;
+  --h4-size: 1.03em;
+  --table-border: #d8e0d5;
+  --table-head: #e9efe6;
+  --table-head-ink: #333834;
+  --table-stripe: rgba(63, 107, 82, 0.05);
+  --math: #3f6b52;
+  --math-bg: #e9efe6;
+  --rule: #d5ded2;
+  --marker: #5e8a6d;
+  --strong: #2f3631;
+  --em: #40473f;
+  --syn-keyword: #3f6b52;
+  --syn-string: #5f7d3f;
+  --syn-number: #8a6a3a;
+  --syn-comment: #929f92;
+  --editor-font: "Segoe UI", "Microsoft YaHei UI", "Microsoft YaHei", sans-serif;
+  --editor-size: 17px;
+}

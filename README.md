@@ -1,4 +1,4 @@
-# Mosharp 1.3.0
+# Mosharp 1.4.0
 
 面向 10 万行仍可编辑的 Markdown 编辑器。
 
@@ -64,7 +64,8 @@ Tauri 2 + SolidJS + CodeMirror 6。Windows 桌面应用（WebView2）。
 
 **外观与语言**
 
-- 15 套主题：8 套浅色（纸色、浅色、雅致、简白、作家、熊红、羊皮纸、Cadmium Light）、7 套深色（深色、午夜、夜航、极地、暖木、德古拉、Material Dark）
+- 19 套主题：10 套浅色（纸色、浅色、雅致、简白、作家、熊红、羊皮纸、Cadmium Light、**晨光**、**青瓷**）、9 套深色（深色、午夜、夜航、极地、暖木、德古拉、Material Dark、**暮色**、**炭火**）
+- **四套低眩光主题**（晨光 / 青瓷 / 暮色 / 炭火）：不用纯白或纯黑背景，强调色降饱和，标题与正文的明度差收窄；正文对比度仍在 9.6:1 以上，长时间写作更不容易累
 - 编辑器可指定字体与字号，优先于主题默认
 - 7 种界面语言：简体中文、繁體中文、English、日本語、Deutsch、Français、Español
 - Windows 自带拼写检查，语言可切换，可维护自定义词表
@@ -123,8 +124,8 @@ npm run tauri build
 | 路径 | 说明 |
 | :--- | :--- |
 | `src-tauri/target/release/mosharp.exe` | 免安装可执行文件 |
-| `src-tauri/target/release/bundle/nsis/Mosharp_1.3.0_x64-setup.exe` | NSIS 安装包（推荐，文件关联由它注册） |
-| `src-tauri/target/release/bundle/msi/Mosharp_1.3.0_x64_en-US.msi` | MSI 安装包（需联网让 Tauri 下载 WiX） |
+| `src-tauri/target/release/bundle/nsis/Mosharp_1.4.0_x64-setup.exe` | NSIS 安装包（推荐，文件关联由它注册） |
+| `src-tauri/target/release/bundle/msi/Mosharp_1.4.0_x64_en-US.msi` | MSI 安装包（需联网让 Tauri 下载 WiX） |
 
 只要 NSIS、不想等 MSI：
 

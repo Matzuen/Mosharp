@@ -54,6 +54,8 @@ const required = [
   "--editor-size",
 ];
 
+let softLight = 0;
+let softDark = 0;
 let colamdLight = 0;
 let colamdDark = 0;
 const styles = readFileSync(join(dir, "styles.ts"), "utf8");
@@ -62,6 +64,8 @@ const readme = readFileSync(join(dir, "README.md"), "utf8");
 for (const item of THEMES) {
   if (item.set === "colamd" && item.scheme === "light") colamdLight += 1;
   if (item.set === "colamd" && item.scheme === "dark") colamdDark += 1;
+  if (item.set === "soft" && item.scheme === "light") softLight += 1;
+  if (item.set === "soft" && item.scheme === "dark") softDark += 1;
   const css = readFileSync(join(dir, `${item.id}.css`), "utf8");
   if (!css.includes(`html[data-theme="${item.id}"]`)) throw new Error(`selector ${item.id}`);
   if (!css.includes(`--paper: ${item.swatch}`)) throw new Error(`swatch ${item.id}`);
@@ -72,6 +76,7 @@ for (const item of THEMES) {
 }
 
 if (colamdLight !== 6 || colamdDark !== 6) throw new Error(`colamd ${colamdLight}/${colamdDark}`);
+if (softLight !== 2 || softDark !== 2) throw new Error(`soft ${softLight}/${softDark}`);
 if (!THEMES.some((item) => item.id === "cadmium-light" && item.scheme === "light")) {
   throw new Error("cadmium");
 }

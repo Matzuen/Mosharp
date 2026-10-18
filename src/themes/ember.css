@@ -1,0 +1,53 @@
+/* 炭火 (Ember)
+   scheme: dark
+   set: soft
+   变量说明见同目录 README.md。 */
+html[data-theme="ember"] {
+  color-scheme: dark;
+  --paper: #262120;
+  --ink: #d9cfc3;
+  --muted: #b0a496;
+  --faint: #857a6e;
+  --line: #332c29;
+  --bar: #2f2926;
+  --chrome: #2f2926;
+  --accent: #d29a6a;
+  --link: #d29a6a;
+  --menu: #2f2926;
+  --hover: rgba(255, 255, 255, 0.06);
+  --side: #211c1a;
+  --code-bg: rgba(210, 154, 106, 0.14);
+  --code-block: #1e1a18;
+  --code-ink: #e0b48c;
+  --code-block-ink: #d9cfc3;
+  --quote: #b7ab9c;
+  --quote-border: #8a6a4f;
+  --highlight: rgba(206, 168, 88, 0.24);
+  --selection: rgba(210, 154, 106, 0.24);
+  --danger: #cf6f5d;
+  --on-danger: #ffffff;
+  --h1: #e0b48c;
+  --h2: #ede5da;
+  --h3: #d29a6a;
+  --h4: #b7ab9c;
+  --h1-size: 1.62em;
+  --h2-size: 1.34em;
+  --h3-size: 1.15em;
+  --h4-size: 1.03em;
+  --table-border: #38302b;
+  --table-head: #2f2926;
+  --table-head-ink: #ede5da;
+  --table-stripe: rgba(210, 154, 106, 0.07);
+  --math: #d8b48f;
+  --math-bg: #2a2421;
+  --rule: #403631;
+  --marker: #d29a6a;
+  --strong: #ede5da;
+  --em: #d9cfc3;
+  --syn-keyword: #d29a6a;
+  --syn-string: #a8b878;
+  --syn-number: #c9a0c4;
+  --syn-comment: #6b5f54;
+  --editor-font: "Segoe UI", "Microsoft YaHei UI", "Microsoft YaHei", sans-serif;
+  --editor-size: 17px;
+}

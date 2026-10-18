@@ -1,5 +1,10 @@
 export type ThemeScheme = "light" | "dark";
-export type ThemeSet = "app" | "colamd" | "marktext";
+/**
+ * Where a theme came from. `soft` themes are tuned here for long writing
+ * sessions: no pure white or black, desaturated accents, slightly reduced
+ * heading contrast.
+ */
+export type ThemeSet = "app" | "colamd" | "marktext" | "soft";
 
 export interface ThemeDef {
   id: string;
@@ -19,6 +24,8 @@ export const THEMES: readonly ThemeDef[] = [
   { id: "bear", scheme: "light", set: "colamd", zh: "熊红", en: "Bear", swatch: "#ffffff" },
   { id: "sepia", scheme: "light", set: "colamd", zh: "羊皮纸", en: "Sepia", swatch: "#f6efe0" },
   { id: "cadmium-light", scheme: "light", set: "marktext", zh: "Cadmium Light", en: "Cadmium Light", swatch: "#ffffff" },
+  { id: "dawn", scheme: "light", set: "soft", zh: "晨光", en: "Dawn", swatch: "#f7f3ec" },
+  { id: "celadon", scheme: "light", set: "soft", zh: "青瓷", en: "Celadon", swatch: "#f1f4f0" },
   { id: "dark", scheme: "dark", set: "colamd", zh: "深色", en: "Dark", swatch: "#0d1117" },
   { id: "midnight", scheme: "dark", set: "colamd", zh: "午夜", en: "Midnight", swatch: "#000000" },
   { id: "solarized-dark", scheme: "dark", set: "colamd", zh: "夜航", en: "Solarized Dark", swatch: "#002b36" },
@@ -26,6 +33,8 @@ export const THEMES: readonly ThemeDef[] = [
   { id: "gruvbox", scheme: "dark", set: "colamd", zh: "暖木", en: "Gruvbox", swatch: "#282828" },
   { id: "dracula", scheme: "dark", set: "colamd", zh: "德古拉", en: "Dracula", swatch: "#282a36" },
   { id: "material-dark", scheme: "dark", set: "marktext", zh: "Material Dark", en: "Material Dark", swatch: "#34393f" },
+  { id: "dusk", scheme: "dark", set: "soft", zh: "暮色", en: "Dusk", swatch: "#21262e" },
+  { id: "ember", scheme: "dark", set: "soft", zh: "炭火", en: "Ember", swatch: "#262120" },
 ];
 
 export const THEME_IDS = THEMES.map((item) => item.id);
