@@ -13,7 +13,8 @@ use search::search_workspace;
 use startup::{markdown_args, take_startup_files, StartupFiles};
 use tauri::{Emitter, Manager};
 use watch::{
-    recovery_folder, save_recovery_copy, suppress_file_watch, sync_file_watches,
+    delete_recovery_copy, list_recovery_copies, recovery_folder, save_recovery_copy, suppress_file_watch,
+    sync_file_watches,
     touch_file_watch_baseline, FileWatchState,
 };
 use workspace::{
@@ -63,6 +64,8 @@ pub fn run() {
             suppress_file_watch,
             touch_file_watch_baseline,
             save_recovery_copy,
+            list_recovery_copies,
+            delete_recovery_copy,
             recovery_folder,
             take_startup_files,
             close_gate::set_unsaved,

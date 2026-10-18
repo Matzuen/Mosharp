@@ -108,6 +108,24 @@ export function recoveryFolder(): Promise<string> {
   return invoke("recovery_folder");
 }
 
+export interface RecoveryEntryInfo {
+  path: string;
+  name: string;
+  size: number;
+  /** Milliseconds since the epoch; 0 when unknown. */
+  modified: number;
+}
+
+/** Recovery copies on disk, newest first. */
+export function listRecoveryCopies(): Promise<RecoveryEntryInfo[]> {
+  return invoke("list_recovery_copies");
+}
+
+/** Delete one recovery copy; only paths inside the recovery folder are accepted. */
+export function deleteRecoveryCopy(path: string): Promise<void> {
+  return invoke("delete_recovery_copy", { path });
+}
+
 /** Read a referenced image as a data: URI so exports can embed it. */
 export function readImageDataUri(path: string): Promise<string> {
   return invoke("read_image_data_uri", { path });

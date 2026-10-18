@@ -82,6 +82,7 @@ import { searchWorkspace, type WorkspaceSearch } from "./api/search";
 import { CommandPalette, type PaletteAction } from "./shell/CommandPalette";
 import { MenuBar, type MenuDef, type MenuEntry } from "./shell/MenuBar";
 import { SettingsDialog } from "./shell/SettingsDialog";
+import { RecoveryDialog } from "./shell/RecoveryDialog";
 import { chordFromEvent } from "./shell/shortcuts";
 import { ancestorPaths, isInside } from "./shell/treePaths";
 import {
@@ -268,6 +269,7 @@ export default function App() {
   const [menu, setMenu] = createSignal<MenuState | null>(null);
   const [paletteOpen, setPaletteOpen] = createSignal(false);
   const [settingsOpen, setSettingsOpen] = createSignal(false);
+  const [recoveryOpen, setRecoveryOpen] = createSignal(false);
   const [dropHover, setDropHover] = createSignal(false);
   const [fileQuery, setFileQuery] = createSignal("");
   const [outlineQuery, setOutlineQuery] = createSignal("");
@@ -1713,6 +1715,11 @@ export default function App() {
             run: () => void openRecoveryFolder(),
           },
           {
+            id: "browse-recovery",
+            label: label("recoveryCopies"),
+            run: () => setRecoveryOpen(true),
+          },
+          {
             id: "reset-prefs",
             label: label("restoreDefaults"),
             run: () => resetPreferences(),
@@ -2596,6 +2603,19 @@ export default function App() {
           onChange={patchPrefs}
           onClose={() => {
             setSettingsOpen(false);
+            editor?.focus();
+          }}
+        />
+      </Show>
+      <Show when={recoveryOpen()}>
+        <RecoveryDialog
+          locale={locale()}
+          onOpen={(path) => {
+            setRecoveryOpen(false);
+            void openPathInTab(path);
+          }}
+          onClose={() => {
+            setRecoveryOpen(false);
             editor?.focus();
           }}
         />

@@ -363,6 +363,75 @@ fn recovery_dir() -> Result<PathBuf, String> {
     Ok(dir)
 }
 
+/// One recovery copy, as listed for the restore dialog.
+#[derive(serde::Serialize)]
+pub struct RecoveryEntry {
+    pub path: String,
+    pub name: String,
+    pub size: u64,
+    /// Milliseconds since the epoch; 0 when the timestamp is unavailable.
+    pub modified: u64,
+}
+
+#[tauri::command]
+pub fn list_recovery_copies() -> Result<Vec<RecoveryEntry>, String> {
+    let dir = recovery_dir()?;
+    let mut entries = Vec::new();
+    let read = match fs::read_dir(&dir) {
+        Ok(read) => read,
+        // A missing folder just means nothing was ever recovered.
+        Err(_) => return Ok(entries),
+    };
+    for item in read.flatten() {
+        let path = item.path();
+        if !path.is_file() {
+            continue;
+        }
+        let metadata = match item.metadata() {
+            Ok(metadata) => metadata,
+            Err(_) => continue,
+        };
+        let modified = metadata
+            .modified()
+            .ok()
+            .and_then(|value| value.duration_since(UNIX_EPOCH).ok())
+            .map(|value| value.as_millis() as u64)
+            .unwrap_or(0);
+        entries.push(RecoveryEntry {
+            path: path.to_string_lossy().into_owned(),
+            name: path
+                .file_name()
+                .map(|value| value.to_string_lossy().into_owned())
+                .unwrap_or_default(),
+            size: metadata.len(),
+            modified,
+        });
+    }
+    // Newest first: the copy you want is usually the one just written.
+    entries.sort_by(|left, right| right.modified.cmp(&left.modified));
+    Ok(entries)
+}
+
+/// Delete one recovery copy. Paths outside the recovery folder are refused.
+#[tauri::command]
+pub fn delete_recovery_copy(path: String) -> Result<(), String> {
+    let dir = recovery_dir()?;
+    let candidate = PathBuf::from(&path);
+    let parent = candidate
+        .parent()
+        .ok_or_else(|| "无效的路径".to_string())?;
+    // Compare canonical forms so `..` cannot escape the folder.
+    let parent = parent.canonicalize().map_err(|err| err.to_string())?;
+    let root = dir.canonicalize().map_err(|err| err.to_string())?;
+    if parent != root {
+        return Err("只能删除恢复目录里的副本".to_string());
+    }
+    if !candidate.is_file() {
+        return Err("该副本已不存在".to_string());
+    }
+    fs::remove_file(&candidate).map_err(|err| err.to_string())
+}
+
 /// Path of the recovery folder, created on demand so the UI can reveal it.
 #[tauri::command]
 pub fn recovery_folder() -> Result<String, String> {
