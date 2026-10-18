@@ -1846,18 +1846,10 @@ export default function App() {
 
   /**
    * Open the documents Windows passed on the command line (Explorer
-   * double-click / file association). Session restore must not swallow them:
-   * that made double-clicking a file show the previously closed document.
+   * double-click / file association).
    */
-  async function openStartupFiles() {
-    if (!isTauri()) return;
-    let paths: string[] = [];
-    try {
-      paths = await takeStartupFiles();
-    } catch {
-      return;
-    }
-    if (!paths.length) return;
+  async function openStartupPaths(paths: string[]) {
+    if (!isTauri() || paths.length === 0) return;
     const blanks = tabs().filter((tab) => !tab.path && !tab.dirty).map((tab) => tab.id);
     for (const path of paths) await openPathInTab(path);
     // Only discard the empty placeholder if a requested file really opened.
@@ -1866,6 +1858,8 @@ export default function App() {
       setTabs((current) => current.filter((tab) => !blanks.includes(tab.id)));
     }
   }
+
+  /** Used by the single-instance event: the window is already running. */
 
   async function minimizeWindow() {
     if (!isTauri()) return;
@@ -1915,7 +1909,18 @@ export default function App() {
     applyEditorPrefs();
 
     void (async () => {
-      const restored = await restoreSession();
+      // A file passed by Explorer means "open this document", not "continue
+      // where I left off": restoring the previous session on top of it made
+      // the old tabs reappear whenever a new file was double-clicked.
+      let startup: string[] = [];
+      if (isTauri()) {
+        try {
+          startup = await takeStartupFiles();
+        } catch {
+          startup = [];
+        }
+      }
+      const restored = startup.length === 0 ? await restoreSession() : false;
       if (!restored) {
         const firstId = newTabId();
         activeId = firstId;
@@ -1938,9 +1943,7 @@ export default function App() {
       } else {
         setNotice(t(locale(), "restored"));
       }
-      // Restoring the session first keeps the user's tabs, then the file they
-      // actually asked for becomes the active tab.
-      await openStartupFiles();
+      await openStartupPaths(startup);
     })();
 
     if (initialPrefs.workspaceRoot && isTauri()) {
