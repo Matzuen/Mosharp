@@ -44,7 +44,7 @@ import {
   livePreviewTheme,
   refreshPreview,
 } from "./preview/livePreview";
-import { extendDeletion } from "./preview/markerEdit";
+import { advanceOverMarkers, extendDeletion } from "./preview/markerEdit";
 import {
   focusModeField,
   setFocusMode,
@@ -241,6 +241,21 @@ function deleteHiddenMarker(view: EditorView, forward: boolean): boolean {
   return true;
 }
 
+/**
+ * Home on a line that starts with a hidden marker (`## `, `- `, `> `) goes to the
+ * first visible character. Default Home would sit in front of the marker, where
+ * typing silently changes the line's structure.
+ */
+function homePastMarkers(view: EditorView): boolean {
+  const range = view.state.selection.main;
+  if (!range.empty) return false;
+  const line = view.state.doc.lineAt(range.head);
+  const start = advanceOverMarkers(hiddenMarkersAt(view, line.from), line.from);
+  if (start === line.from || range.head === start) return false;
+  view.dispatch({ selection: { anchor: start } });
+  return true;
+}
+
 function buildExtensions(
   hooks: {
     onEdit: () => void;
@@ -288,6 +303,7 @@ function buildExtensions(
           run: (view) => deleteEmptyFence(view) || deleteHiddenMarker(view, false),
         },
         { key: "Delete", run: (view) => deleteHiddenMarker(view, true) },
+        { key: "Home", run: homePastMarkers },
       ]),
     ),
     keyCompartment.of(keymap.of(formatKeymapFrom(DEFAULT_SHORTCUTS))),

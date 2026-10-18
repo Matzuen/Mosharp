@@ -1,12 +1,15 @@
 /**
- * Deletion at the edge of a hidden marker.
+ * Caret behaviour around hidden inline markers.
  *
  * Markers such as `**` or `# ` are replaced by zero-width decorations and
- * registered as atomic ranges, so the caret skips over them. The character
- * immediately next to the caret can still fall *inside* such a range, which
- * makes Backspace delete half a marker: the text then looks unchanged to the
- * user, or a stray `*` appears. Extending the deletion to the whole marker is
- * what the user meant.
+ * registered as atomic ranges, so arrow keys skip over them. Two edges remain:
+ *
+ * - the character *next to* the caret can still be a marker character, so
+ *   Backspace would delete half of it and leave a stray `*`;
+ * - Home would land in front of the hidden `# `, where typing changes the
+ *   line's structure instead of its text.
+ *
+ * Both are pure functions over ranges, so they can be tested without a DOM.
  */
 
 export interface Range {
@@ -37,4 +40,21 @@ export function extendDeletion(
     }
   }
   return null;
+}
+
+/**
+ * Position after the run of hidden markers that starts at `pos`.
+ *
+ * Home on `## **Title**` should reach the start of the visible text, not the
+ * position in front of the hidden `## `.
+ */
+export function advanceOverMarkers(markers: readonly Range[], pos: number): number {
+  let current = pos;
+  // Bounded: a line cannot chain more than a few markers.
+  for (let guard = 0; guard < 8; guard += 1) {
+    const next = markers.find((marker) => marker.from === current);
+    if (!next || next.to <= current) break;
+    current = next.to;
+  }
+  return current;
 }
