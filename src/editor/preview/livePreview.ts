@@ -20,7 +20,7 @@ import { diagramKind } from "./diagramKind";
 import { notify } from "./notify";
 import { insideStrictly } from "./cursorScope";
 import { frontMatterLines } from "./frontMatter";
-import { dragColumn, evenWidths, tableKey, type ColumnWidths } from "./tableGeometry";
+import { dragColumn, evenWidths, scrollStep, tableKey, type ColumnWidths } from "./tableGeometry";
 import { MAX_ENTRIES, TocScan, type TocEntry } from "./toc";
 import { sanitizeHtml } from "../../export/sanitize";
 import { focusModeField, sourceModeField } from "./modes";
@@ -626,6 +626,14 @@ class TableWidget extends WidgetType {  dom: HTMLElement | null = null;
         }
       };
       const move = (moveEvent: PointerEvent) => {
+        // Row dragging spans the document, so it needs the same edge scrolling
+        // as cell selection.
+        if (kind === "row") {
+          const scroller = view.scrollDOM;
+          const box = scroller.getBoundingClientRect();
+          const step = scrollStep(box.top, box.bottom, moveEvent.clientY);
+          if (step !== 0) scroller.scrollTop += step;
+        }
         const position = kind === "row" ? moveEvent.clientY : moveEvent.clientX;
         const found = slotAt(rects(), position);
         if (found < 0) return;
@@ -717,6 +725,12 @@ class TableWidget extends WidgetType {  dom: HTMLElement | null = null;
 
     const onMove = (event: MouseEvent) => {
       if (!selAnchor) return;
+      // Near the viewport edge, scroll so a long range can be dragged further
+      // than one screen.
+      const scroller = view.scrollDOM;
+      const box = scroller.getBoundingClientRect();
+      const step = scrollStep(box.top, box.bottom, event.clientY);
+      if (step !== 0) scroller.scrollTop += step;
       const pos = cellPos(document.elementFromPoint(event.clientX, event.clientY));
       if (!pos) return;
       if (pos.row === selAnchor.row && pos.col === selAnchor.col) return;
@@ -740,6 +754,14 @@ class TableWidget extends WidgetType {  dom: HTMLElement | null = null;
       if (event.ctrlKey || event.metaKey) return;
       const pos = cellPos(event.target);
       if (!pos) return;
+      // Shift+click extends the existing range instead of starting a new one.
+      if (event.shiftKey && selAnchor) {
+        event.preventDefault();
+        selFocus = pos;
+        selDragging = true;
+        paintSelection();
+        return;
+      }
       selAnchor = pos;
       selFocus = pos;
       selDragging = false;

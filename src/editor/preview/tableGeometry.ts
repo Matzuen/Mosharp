@@ -59,3 +59,29 @@ export function tableKey(headerCells: string[], columnCount: number): string {
   const header = headerCells.map((cell) => cell.trim()).join("|");
   return `${columnCount}#${header}`;
 }
+
+/**
+ * Scroll step while dragging near the top or bottom edge of a scroller.
+ *
+ * Returns a signed pixel amount: negative scrolls up. `edge` is the band that
+ * starts the auto-scroll, and the amount grows with how far past it the pointer
+ * is, capped at `max` so the view does not run away.
+ */
+export function scrollStep(
+  top: number,
+  bottom: number,
+  y: number,
+  edge = 28,
+  max = 24,
+): number {
+  if (bottom - top <= edge * 2) return 0;
+  if (y < top + edge) {
+    const depth = Math.min(top + edge - y, edge * 2);
+    return -Math.min(max, Math.max(2, (depth / edge) * 8));
+  }
+  if (y > bottom - edge) {
+    const depth = Math.min(y - (bottom - edge), edge * 2);
+    return Math.min(max, Math.max(2, (depth / edge) * 8));
+  }
+  return 0;
+}
