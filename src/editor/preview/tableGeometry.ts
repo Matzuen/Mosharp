@@ -27,20 +27,29 @@ export function evenWidths(count: number, total: number): ColumnWidths {
  * Drag the border to the right of column `index` by `delta` pixels.
  *
  * Only that column changes: the table grows or shrinks, which is what a fixed
- * layout with explicit widths does. Clamped so a column cannot vanish.
+ * layout with explicit widths does. Clamped so a column cannot vanish, and so
+ * the table does not grow past the content width.
  */
 export function dragColumn(
   current: ColumnWidths,
   index: number,
   delta: number,
-  min = MIN_COLUMN_WIDTH,
+  {
+    min = MIN_COLUMN_WIDTH,
+    maxTotal = Number.POSITIVE_INFINITY,
+  }: { min?: number; maxTotal?: number } = {},
 ): ColumnWidths {
   if (index < 0 || index >= current.widths.length) return current;
   const widths = current.widths.slice();
   const next = Math.max(min, widths[index] + delta);
   if (next === widths[index]) return current;
   widths[index] = next;
-  return { widths, total: widths.reduce((sum, width) => sum + width, 0) };
+  const total = widths.reduce((sum, width) => sum + width, 0);
+  // `maxTotal` is the available content width, not the table's current width:
+  // clamping to the current width would make a column impossible to widen again
+  // after it has been shrunk.
+  if (total > maxTotal) return current;
+  return { widths, total };
 }
 
 /** Widths are reset when the column count changes (the layout no longer applies). */

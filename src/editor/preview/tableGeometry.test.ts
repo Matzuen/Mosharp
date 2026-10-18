@@ -30,6 +30,18 @@ assert(widened.total === 460, "the total follows");
 const narrowed = dragColumn(even, 1, -30);
 assert(narrowed.widths[1] === 70, "dragging left shrinks the column");
 
+// Shrinking must not lock the column: widening is bounded by the content width.
+const shrunk = dragColumn(even, 1, -40, { maxTotal: 400 });
+assert(shrunk.widths[1] === 60 && shrunk.total === 360, `shrink keeps the total (got ${shrunk.total})`);
+const regrown = dragColumn(shrunk, 1, 40, { maxTotal: 400 });
+assert(regrown.widths[1] === 100, `a shrunk column widens again (got ${regrown.widths[1]})`);
+assert(regrown.total === 400, "back to the content width");
+
+const tooWide = dragColumn(even, 1, 80, { maxTotal: 400 });
+assert(tooWide === even, "widening past the content width is refused");
+const stillRoom = dragColumn(even, 1, 40, { maxTotal: 460 });
+assert(stillRoom.widths[1] === 140, "widening is allowed while there is room");
+
 const clamped = dragColumn(even, 1, -500);
 assert(clamped.widths[1] === MIN_COLUMN_WIDTH, "a column cannot collapse");
 

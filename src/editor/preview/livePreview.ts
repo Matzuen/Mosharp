@@ -500,6 +500,10 @@ class TableWidget extends WidgetType {  dom: HTMLElement | null = null;
       event.preventDefault();
       event.stopPropagation();
       const rect = table.getBoundingClientRect();
+      // Widening is bounded by the available content width (the wrap is 100% of
+      // the line box), not by the table's width at grab time: clamping to the
+      // latter makes a column impossible to widen again after shrinking.
+      const maxTotal = Math.max(rect.width, wrap.getBoundingClientRect().width);
       const measured = columns.map((col) => col.getBoundingClientRect().width);
       const current =
         measured.every((width) => width > 0) && measured.length === columns.length
@@ -513,11 +517,8 @@ class TableWidget extends WidgetType {  dom: HTMLElement | null = null;
 
       const move = (moveEvent: PointerEvent) => {
         const delta = (moveEvent.clientX - startX) / (viewportZoom() || 1);
-        const next = dragColumn(startWidths, index, delta);
+        const next = dragColumn(startWidths, index, delta, { maxTotal });
         if (next === widths) return;
-        // Growing past the editor width would spill outside the text column, so
-        // widening stops at the table's original width.
-        if (next.total > rect.width) return;
         widths = next;
         columns[index].style.width = `${widths.widths[index]}px`;
         table.style.tableLayout = "fixed";
