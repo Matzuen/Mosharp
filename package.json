@@ -10,7 +10,8 @@
     "serve": "vite preview",
     "check": "tsc --noEmit",
     "test": "node scripts/test.mjs",
-    "tauri": "tauri"
+    "tauri": "tauri",
+    "e2e": "node scripts/e2e.mjs"
   },
   "license": "MIT",
   "dependencies": {

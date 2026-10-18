@@ -732,7 +732,9 @@ class TableWidget extends WidgetType {  dom: HTMLElement | null = null;
     const currentRange = () =>
       selAnchor && selFocus ? normalizeRange(selAnchor, selFocus) : null;
 
-    const onMove = (event: MouseEvent) => {
+    // Pointer events, not mouse events: CodeMirror stops mousedown propagation
+    // before it reaches the widget, so a mousedown listener here never ran.
+    const onMove = (event: PointerEvent) => {
       if (!selAnchor) return;
       // Near the viewport edge, scroll so a long range can be dragged further
       // than one screen.
@@ -753,12 +755,12 @@ class TableWidget extends WidgetType {  dom: HTMLElement | null = null;
       paintSelection();
     };
     const onUp = () => {
-      window.removeEventListener("mousemove", onMove, true);
-      window.removeEventListener("mouseup", onUp, true);
+      window.removeEventListener("pointermove", onMove, true);
+      window.removeEventListener("pointerup", onUp, true);
       // A plain click is not a range: let the cell keep the caret.
       if (!selDragging) clearSelection();
     };
-    table.addEventListener("mousedown", (event) => {
+    table.addEventListener("pointerdown", (event) => {
       if (event.button !== 0) return;
       if (event.ctrlKey || event.metaKey) return;
       const pos = cellPos(event.target);
@@ -775,8 +777,8 @@ class TableWidget extends WidgetType {  dom: HTMLElement | null = null;
       selFocus = pos;
       selDragging = false;
       paintSelection();
-      window.addEventListener("mousemove", onMove, true);
-      window.addEventListener("mouseup", onUp, true);
+      window.addEventListener("pointermove", onMove, true);
+      window.addEventListener("pointerup", onUp, true);
     });
 
     // Capture phase: the cell's own keydown handler stops propagation on every
