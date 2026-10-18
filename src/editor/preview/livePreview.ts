@@ -1215,6 +1215,8 @@ export const hiddenLineNumberField = StateField.define<RangeSet<GutterMarker>>({
 interface PreviewBuild {
   decos: Range<Decoration>[];
   atomic: Range<Decoration>[];
+  /** Hidden inline markers only (no widgets), for marker-aware deletion. */
+  markers: Range<Decoration>[];
   lineClasses: Map<number, Set<string>>;
   covered: Array<{ from: number; to: number }>;
   hidden: number[];
@@ -1240,6 +1242,9 @@ function hide(build: PreviewBuild, from: number, to: number, widget?: WidgetType
   const deco = Decoration.replace(widget ? { widget } : {}).range(from, to);
   build.decos.push(deco);
   build.atomic.push(deco);
+  // Only bare markers take part in marker-aware deletion; widgets (chips,
+  // folded lines) must not vanish on a stray Backspace.
+  if (!widget) build.markers.push(deco);
 }
 
 /** Cursor is inside the range, including either edge, so a mark just typed stays visible. */
@@ -1605,12 +1610,14 @@ function spanLabel(build: PreviewBuild, doc: Text, firstLine: number, lastLine: 
 const emptyPreview = {
   decorations: Decoration.none,
   atomic: Decoration.none,
+  markers: Decoration.none,
   hidden: RangeSet.empty as RangeSet<GutterMarker>,
 };
 
 function buildDecorations(view: EditorView): {
   decorations: DecorationSet;
   atomic: DecorationSet;
+  markers: DecorationSet;
   hidden: RangeSet<GutterMarker>;
 } {
   if (view.state.field(sourceModeField)) return emptyPreview;
@@ -1620,6 +1627,7 @@ function buildDecorations(view: EditorView): {
   const build: PreviewBuild = {
     decos: [],
     atomic: [],
+    markers: [],
     lineClasses: new Map(),
     covered: [],
     hidden: [],
@@ -1649,6 +1657,7 @@ function buildDecorations(view: EditorView): {
     return {
       decorations: Decoration.set(build.decos, true),
       atomic: Decoration.set(build.atomic, true),
+      markers: Decoration.set(build.markers, true),
       hidden: gutterMarkers(build),
     };
   } catch (error) {
@@ -1779,6 +1788,30 @@ function findActiveBlock(view: EditorView): { from: number; to: number } | null 
 }
 
 /**
+ * Hidden inline markers near `pos`, for marker-aware Backspace/Delete.
+ *
+ * Registered atomic ranges keep the caret off these markers, but the character
+ * next to the caret can still be one of them: deleting it by halves leaves a
+ * stray `*` behind.
+ */
+export function hiddenMarkersAt(
+  view: EditorView,
+  pos: number,
+): Array<{ from: number; to: number }> {
+  const plugin = view.plugin(livePreviewPlugin);
+  if (!plugin) return [];
+  const found: Array<{ from: number; to: number }> = [];
+  plugin.markers.between(
+    Math.max(0, pos - 2),
+    Math.min(view.state.doc.length, pos + 2),
+    (from, to) => {
+      found.push({ from, to });
+    },
+  );
+  return found;
+}
+
+/**
  * Live preview that stays off the main-thread critical path on huge docs:
  * - never calls forceParsing (that froze 100k-line scroll/close)
  * - on large docs, rebuild only after scroll idle
@@ -1788,6 +1821,8 @@ export const livePreviewPlugin = ViewPlugin.fromClass(
   class {
     decorations: DecorationSet;
     atomic: DecorationSet;
+    /** Hidden inline markers, for marker-aware Backspace/Delete. */
+    markers: DecorationSet;
     sinkMarkers: RangeSet<GutterMarker>;
     private idleTimer: ReturnType<typeof setTimeout> | null = null;
     private pendingIdle = false;
@@ -1797,6 +1832,7 @@ export const livePreviewPlugin = ViewPlugin.fromClass(
       const built = buildDecorations(view);
       this.decorations = built.decorations;
       this.atomic = built.atomic;
+      this.markers = built.markers;
       this.sinkMarkers = built.hidden;
       this.scheduleSinkSync(view);
     }
@@ -1807,6 +1843,7 @@ export const livePreviewPlugin = ViewPlugin.fromClass(
         this.clearIdle();
         this.decorations = Decoration.none;
         this.atomic = Decoration.none;
+        this.markers = Decoration.none;
         this.sinkMarkers = RangeSet.empty;
         this.scheduleSinkSync(update.view);
         return;
@@ -1846,6 +1883,7 @@ export const livePreviewPlugin = ViewPlugin.fromClass(
       const built = buildDecorations(view);
       this.decorations = built.decorations;
       this.atomic = built.atomic;
+      this.markers = built.markers;
       this.sinkMarkers = built.hidden;
       this.scheduleSinkSync(view);
     }

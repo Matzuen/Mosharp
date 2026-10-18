@@ -39,10 +39,12 @@ import { blockStarter, emptyFenceRange, fenceCloseText, fenceOpener } from "./au
 import { setPandocMath } from "./preview/math";
 import {
   hiddenLineNumberField,
+  hiddenMarkersAt,
   livePreviewPlugin,
   livePreviewTheme,
   refreshPreview,
 } from "./preview/livePreview";
+import { extendDeletion } from "./preview/markerEdit";
 import {
   focusModeField,
   setFocusMode,
@@ -221,6 +223,24 @@ function deleteEmptyFence(view: EditorView): boolean {
   return true;
 }
 
+/**
+ * Backspace/Delete next to a hidden marker removes the whole marker.
+ * Deleting one character of `**` leaves a stray asterisk that the user never
+ * asked for — the marker is invisible, so it reads as "nothing happened".
+ */
+function deleteHiddenMarker(view: EditorView, forward: boolean): boolean {
+  const range = view.state.selection.main;
+  if (!range.empty) return false;
+  const target = extendDeletion(hiddenMarkersAt(view, range.head), range.head, forward);
+  if (!target) return false;
+  view.dispatch({
+    changes: { from: target.from, to: target.to, insert: "" },
+    selection: { anchor: target.from },
+    userEvent: forward ? "delete.forward" : "delete.backward",
+  });
+  return true;
+}
+
 function buildExtensions(
   hooks: {
     onEdit: () => void;
@@ -261,7 +281,15 @@ function buildExtensions(
     search({ top: true }),
     highlightSelectionMatches({ wholeWords: false }),
     Prec.high(keymap.of([{ key: "Enter", run: closeFenceOnEnter }])),
-    Prec.high(keymap.of([{ key: "Backspace", run: deleteEmptyFence }])),
+    Prec.high(
+      keymap.of([
+        {
+          key: "Backspace",
+          run: (view) => deleteEmptyFence(view) || deleteHiddenMarker(view, false),
+        },
+        { key: "Delete", run: (view) => deleteHiddenMarker(view, true) },
+      ]),
+    ),
     keyCompartment.of(keymap.of(formatKeymapFrom(DEFAULT_SHORTCUTS))),
     keymap.of([
       indentWithTab,
