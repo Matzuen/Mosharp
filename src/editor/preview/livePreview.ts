@@ -20,6 +20,7 @@ import { diagramKind } from "./diagramKind";
 import { notify } from "./notify";
 import { insideStrictly } from "./cursorScope";
 import { frontMatterLines } from "./frontMatter";
+import { dragColumn, evenWidths, tableKey, type ColumnWidths } from "./tableGeometry";
 import { MAX_ENTRIES, TocScan, type TocEntry } from "./toc";
 import { sanitizeHtml } from "../../export/sanitize";
 import { focusModeField, sourceModeField } from "./modes";
@@ -34,6 +35,7 @@ import {
   TABLE_MENU_KEYS,
   type TableOp,
 } from "./tableOps";
+import { viewportZoom } from "./zoom";
 
 /** Shared attributes for the small inline toolbar icons. */
 const ICON_ATTRS =
@@ -49,6 +51,13 @@ const ALIGN_ORDER = ["left", "center", "right"] as const;
 
 /** Cell to focus once the table widget at `from` has been rebuilt. */
 let pendingCellFocus: { from: number; row: number; col: number } | null = null;
+
+/**
+ * Column widths dragged by the user, keyed by table header. Session-scoped on
+ * purpose: Markdown has no place to store display widths, and writing them into
+ * the delimiter row would change the file's meaning.
+ */
+const columnWidths = new Map<string, ColumnWidths>();
 
 /** Docs at/above this line count: decorate only after scroll settles. */
 const LARGE_DOC_LINES = 8_000;
@@ -384,8 +393,7 @@ class TocWidget extends WidgetType {
   }
 }
 
-class TableWidget extends WidgetType {
-  dom: HTMLElement | null = null;
+class TableWidget extends WidgetType {  dom: HTMLElement | null = null;
   /** Visual cell the last interaction happened in; row 0 is the header. */
   private activeRow = 0;
   private activeCol = 0;
@@ -458,10 +466,82 @@ class TableWidget extends WidgetType {
       view.focus();
     };
 
+    // Column widths survive widget rebuilds within the session, keyed by the
+    // header: the Markdown format has nowhere to store them.
+    const key = tableKey(header, header.length);
+    const colgroup = document.createElement("colgroup");
+    const columns: HTMLTableColElement[] = [];
+    const remembered = columnWidths.get(key);
+    for (let i = 0; i < header.length; i += 1) {
+      const col = document.createElement("col");
+      if (remembered) col.style.width = `${remembered.widths[i]}px`;
+      colgroup.appendChild(col);
+      columns.push(col);
+    }
+    if (remembered) {
+      table.style.tableLayout = "fixed";
+      table.style.width = `${remembered.total}px`;
+    }
+    table.appendChild(colgroup);
+
+    /**
+     * Drag the border after a column. `pointermove` is measured in viewport
+     * pixels, so it is divided by the UI zoom to stay in layout units.
+     */
+    const startResize = (event: PointerEvent, index: number) => {
+      if (event.button !== 0) return;
+      event.preventDefault();
+      event.stopPropagation();
+      const rect = table.getBoundingClientRect();
+      const measured = columns.map((col) => col.getBoundingClientRect().width);
+      const current =
+        measured.every((width) => width > 0) && measured.length === columns.length
+          ? { widths: measured, total: measured.reduce((sum, width) => sum + width, 0) }
+          : evenWidths(columns.length, rect.width);
+      const startX = event.clientX;
+      let widths = current;
+      const handle = event.currentTarget as HTMLElement;
+      handle.setPointerCapture(event.pointerId);
+      wrap.classList.add("cm-md-table-resizing");
+
+      const move = (moveEvent: PointerEvent) => {
+        const delta = (moveEvent.clientX - startX) / (viewportZoom() || 1);
+        const next = dragColumn(startWidths, index, delta);
+        if (next === widths) return;
+        // Growing past the editor width would spill outside the text column, so
+        // widening stops at the table's original width.
+        if (next.total > rect.width) return;
+        widths = next;
+        columns[index].style.width = `${widths.widths[index]}px`;
+        table.style.tableLayout = "fixed";
+        table.style.width = `${widths.total}px`;
+      };
+      const startWidths = current;
+      const done = () => {
+        handle.removeEventListener("pointermove", move);
+        handle.removeEventListener("pointerup", done);
+        handle.removeEventListener("pointercancel", done);
+        wrap.classList.remove("cm-md-table-resizing");
+        columnWidths.set(key, widths);
+      };
+      handle.addEventListener("pointermove", move);
+      handle.addEventListener("pointerup", done);
+      handle.addEventListener("pointercancel", done);
+    };
+
     const thead = document.createElement("thead");    thead.appendChild(
       renderRow(header, aligns, "th", 0, commitAt, activateAt, view, handleTab, exitTable),
     );
     table.appendChild(thead);
+
+    // Resize grips sit on the right edge of every header cell.
+    Array.from(thead.querySelectorAll("th")).forEach((cell, index) => {
+      const grip = document.createElement("span");
+      grip.className = "cm-md-col-grip";
+      grip.setAttribute("aria-hidden", "true");
+      grip.addEventListener("pointerdown", (event) => startResize(event, index));
+      cell.appendChild(grip);
+    });
 
     const tbody = document.createElement("tbody");
     let visualRow = 1;
@@ -1691,8 +1771,7 @@ export const livePreviewTheme = EditorView.baseTheme({
     backgroundPosition: "12px 0",
     backgroundRepeat: "no-repeat",
   },
-  ".cm-md-codeblock": {
-    backgroundColor: "var(--code-block)",
+  ".cm-md-codeblock": {    backgroundColor: "var(--code-block)",
     color: "var(--code-block-ink)",
     fontFamily: 'Consolas, "Courier New", monospace',
     fontSize: "0.92em",
@@ -1720,15 +1799,42 @@ export const livePreviewTheme = EditorView.baseTheme({
     fontSize: "0.95em",
     verticalAlign: "top",
   },
+  // Column resize grip: a transparent strip on the header cell's right edge.
+  ".cm-md-table-widget th": {
+    position: "relative",
+    backgroundColor: "var(--table-head)",
+    color: "var(--table-head-ink)",
+    fontWeight: "650",
+  },
+  ".cm-md-col-grip": {
+    position: "absolute",
+    top: "0",
+    right: "-3px",
+    width: "7px",
+    height: "100%",
+    cursor: "col-resize",
+    touchAction: "none",
+    zIndex: "2",
+  },
+  ".cm-md-col-grip::after": {
+    content: '""',
+    position: "absolute",
+    top: "0",
+    left: "3px",
+    width: "2px",
+    height: "100%",
+    background: "transparent",
+  },
+  ".cm-md-table-resizing .cm-md-col-grip::after": {
+    background: "var(--accent)",
+  },
+  ".cm-md-table-resizing": {
+    userSelect: "none",
+  },
   ".cm-md-table-widget th, .cm-md-table-widget td": {
     border: "1px solid var(--table-border)",
     padding: "6px 10px",
     verticalAlign: "top",
-  },
-  ".cm-md-table-widget th": {
-    backgroundColor: "var(--table-head)",
-    color: "var(--table-head-ink)",
-    fontWeight: "650",
   },
   ".cm-md-table-widget tbody tr:nth-child(even) td": {
     backgroundColor: "var(--table-stripe)",
