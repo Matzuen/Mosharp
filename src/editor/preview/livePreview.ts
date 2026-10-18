@@ -2095,12 +2095,14 @@ export const livePreviewTheme = EditorView.baseTheme({
   ".cm-md-cell-selected": {
     backgroundColor: "var(--accent-soft, rgba(90, 140, 255, 0.18))",
   },
-  // Drag handles for reordering, shown only while hovering the table.
+  // Drag handles for reordering, shown only while hovering the cell.
   ".cm-md-row-grip": {
     position: "absolute",
-    left: "-9px",
+    // Inside the cell's left padding: a handle placed outside the table becomes
+    // unreachable, because hovering it leaves the table and hides the handle.
+    left: "0",
     top: "0",
-    width: "8px",
+    width: "9px",
     height: "100%",
     cursor: "grab",
     opacity: "0",
@@ -2109,14 +2111,15 @@ export const livePreviewTheme = EditorView.baseTheme({
   ".cm-md-col-move-grip": {
     position: "absolute",
     left: "0",
-    top: "-7px",
+    // Same reason as the row grip: keep the hit area inside the header cell.
+    top: "0",
     width: "100%",
     height: "6px",
     cursor: "grab",
     opacity: "0",
     touchAction: "none",
   },
-  ".cm-md-table-widget:hover .cm-md-row-grip, .cm-md-table-widget:hover .cm-md-col-move-grip": {
+  ".cm-md-cell:hover .cm-md-row-grip, .cm-md-table-widget th:hover .cm-md-col-move-grip": {
     opacity: "1",
   },
   ".cm-md-row-grip::after, .cm-md-col-move-grip::after": {
