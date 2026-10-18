@@ -805,6 +805,9 @@ class TableWidget extends WidgetType {  dom: HTMLElement | null = null;
       },
       true,
     );
+    // Typing into a cell ends the range: a highlight over cells the user is no
+    // longer selecting would be misleading.
+    wrap.addEventListener("input", () => clearSelection());
 
     // Mirror the active column's alignment on the toolbar.
     const alignButtons: HTMLButtonElement[] = [];

@@ -272,7 +272,9 @@ function snapPointerSelection(view: EditorView): void {
   if (start === line.from) return;
   view.dispatch({
     selection: { anchor: start },
-    userEvent: "select.pointer",
+    // Not "select.pointer": the listener must not treat this correction as
+    // another pointer selection and re-enter.
+    userEvent: "select.snap",
   });
 }
 
